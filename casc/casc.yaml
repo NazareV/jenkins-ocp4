@@ -1,0 +1,169 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Jenkins Configuration as Code (JCasC)
+# Repo: jenkins-ocp4  (separate from ocp4-upi-powervm terraform repo)
+#
+# Required environment variables at container startup:
+#   See README.md § Environment variables
+# ─────────────────────────────────────────────────────────────────────────────
+
+jenkins:
+  systemMessage: |
+    OCP4 UPI PowerVM – Cluster Automation (jenkins-ocp4)
+    Managed by JCasC. Edit casc/casc.yaml — not the Jenkins UI.
+
+  # ── Controller runs jobs directly (same-machine setup) ─────────────────────
+  # Jenkins creates a numbered workspace dir per concurrent build:
+  #   /var/jenkins_home/workspace/cluster-create/       ← build A
+  #   /var/jenkins_home/workspace/cluster-create@2/     ← build B (same job, concurrent)
+  # .terraform/, data/, and plan files are fully isolated between builds.
+  numExecutors: 10
+  mode: NORMAL
+  labelString: "terraform built-in"
+
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_ID}"
+          name: "Admin"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+  # ── Global non-secret environment variables ─────────────────────────────────
+  globalNodeProperties:
+    - envVars:
+        env:
+          # URL of the JENKINS repo (this repo) — used by seed.groovy
+          - key: "JENKINS_REPO_URL"
+            value: "${JENKINS_REPO_URL}"
+          - key: "JENKINS_REPO_BRANCH"
+            value: "${JENKINS_REPO_BRANCH}"
+
+          # URL of the TERRAFORM repo (ocp4-upi-powervm) — used by pipelines
+          - key: "TF_REPO_URL"
+            value: "${TF_REPO_URL}"
+          - key: "TF_REPO_BRANCH"
+            value: "${TF_REPO_BRANCH}"
+
+          # Shared provider binary cache — safe for concurrent builds
+          # (Terraform uses OS file locking inside this directory)
+          - key: "TF_PLUGIN_CACHE_DIR"
+            value: "/var/jenkins_home/.terraform-plugin-cache"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Credentials
+# ─────────────────────────────────────────────────────────────────────────────
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+
+          # ── PowerVC API ────────────────────────────────────────────────────
+          # user_name + password are now supplied by each user as job parameters.
+          # Only the shared env-level secrets remain here.
+          - string:
+              scope: GLOBAL
+              id: "powervc-auth-url"
+              secret: "${POWERVC_AUTH_URL}"
+              description: "PowerVC auth endpoint → TF_VAR_auth_url"
+
+          - string:
+              scope: GLOBAL
+              id: "powervc-domain-name"
+              secret: "${POWERVC_DOMAIN_NAME}"
+              description: "OpenStack domain name (usually 'Default') → TF_VAR_domain_name"
+
+          # ── OCP pull secret ────────────────────────────────────────────────
+          # Written to tf/data/pull-secret.txt at runtime.
+          # The base var file keeps:  pull_secret_file = "data/pull-secret.txt"
+          # Encode: export OCP_PULL_SECRET_BASE64=$(base64 -w0 ~/pull-secret.txt)
+          - file:
+              scope: GLOBAL
+              id: "ocp-pull-secret"
+              fileName: "pull-secret.txt"
+              secretBytes: "${OCP_PULL_SECRET_BASE64}"
+              description: "OCP pull secret → written to data/pull-secret.txt at runtime"
+
+          # ── Base var file ──────────────────────────────────────────────────
+          # The populated var.tfvars with infrastructure-wide settings.
+          # Must NOT contain: user_name, password, rhel_subscription_*,
+          #                   cluster_id, cluster_id_prefix, tenant_name,
+          #                   cluster_domain, public_key_file, private_key_file.
+          # Those are injected via TF_VAR_* env vars or -var flags.
+          # Encode: export TF_BASE_VARS_B64=$(base64 -w0 base.tfvars)
+          - file:
+              scope: GLOBAL
+              id: "tf-base-vars"
+              fileName: "base.tfvars"
+              secretBytes: "${TF_BASE_VARS_B64}"
+              description: "Base var file (network, image UUIDs, instance types, OCP URLs…)"
+
+          # ── Terraform backend config ───────────────────────────────────────
+          # A .hcl file with the local backend path.
+          # See jenkins-ocp4/backend/local-persistent.hcl.example
+          # Encode: export TF_BACKEND_CONFIG_B64=$(base64 -w0 backend.hcl)
+          - file:
+              scope: GLOBAL
+              id: "terraform-backend-config"
+              fileName: "backend.hcl"
+              secretBytes: "${TF_BACKEND_CONFIG_B64}"
+              description: "Terraform backend config (.hcl) → passed to terraform init -backend-config"
+
+          # ── Git credentials ────────────────────────────────────────────────
+          - usernamePassword:
+              scope: GLOBAL
+              id: "git-credentials"
+              username: "${GIT_USERNAME}"
+              password: "${GIT_TOKEN}"
+              description: "Git personal access token for repo checkout"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plugin settings
+# ─────────────────────────────────────────────────────────────────────────────
+unclassified:
+
+  ansiColorBuildWrapper:
+    globalColorMapName: "xterm"
+
+  timestamperConfig:
+    allPipelines: true
+
+  lockableResourcesManager:
+    declaredResources:
+      - name: "tf-provider-init"
+        description: "Serializes first provider download when the plugin cache is cold."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap: create the seed job
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  - script: |
+      pipelineJob('_seed-jobs') {
+        description('Bootstrap: runs Job DSL (jenkins-ocp4/jobs/seed.groovy) to create cluster-create and cluster-destroy jobs.')
+        logRotator { numToKeep(10) }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url(System.getenv('JENKINS_REPO_URL'))
+                  credentials('git-credentials')
+                }
+                branch(System.getenv('JENKINS_REPO_BRANCH') ?: 'main')
+                extensions {
+                  cloneOption { shallow(true); depth(1); timeout(10) }
+                }
+              }
+            }
+            scriptPath('jobs/seed.groovy')
+            lightweight(false)
+          }
+        }
+        triggers { scm('H/30 * * * *') }
+        properties {
+          disableConcurrentBuilds { abortPrevious(false) }
+        }
+      }

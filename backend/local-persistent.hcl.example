@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Terraform local backend config — persistent host path
+#
+# State layout on the Jenkins host:
+#   /opt/terraform_states/terraform.tfstate                        ← default ws
+#   /opt/terraform_states/terraform.tfstate.d/<workspace>/         ← named ws
+#     e.g. /opt/terraform_states/terraform.tfstate.d/
+#               tenant-a-ocp-cluster01/terraform.tfstate
+#               tenant-b-dev-cluster02/terraform.tfstate
+#               tenant-a-ocp-cluster03/terraform.tfstate
+#
+# REQUIREMENTS:
+#   1. Create the directory on the host:
+#        sudo mkdir -p /opt/terraform_states
+#        sudo chown 1000:1000 /opt/terraform_states   # uid 1000 = jenkins user
+#
+#   2. Mount it into the Jenkins container:
+#        docker run ... -v /opt/terraform_states:/opt/terraform_states ...
+#
+#   3. Encode this file and set as the terraform-backend-config credential:
+#        base64 -w0 local-persistent.hcl | xclip   # or pipe to env var
+#        export TF_BACKEND_CONFIG_B64=$(base64 -w0 local-persistent.hcl)
+# ─────────────────────────────────────────────────────────────────────────────
+
+path = "/opt/terraform_states/terraform.tfstate"

@@ -1,0 +1,32 @@
+# Core pipeline
+workflow-aggregator:latest
+pipeline-stage-view:latest
+blueocean:latest
+
+# Configuration as Code
+configuration-as-code:latest
+
+# Job creation
+job-dsl:latest
+
+# Credentials and secrets
+credentials-binding:latest
+credentials:latest
+
+# SCM
+git:latest
+
+# Concurrency control
+lockable-resources:latest
+
+# UI / UX
+ansicolor:latest
+timestamper:latest
+build-timeout:latest
+
+# Authorization
+matrix-auth:latest
+authorize-project:latest
+
+# Notifications (optional)
+email-ext:latest

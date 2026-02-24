@@ -1,0 +1,414 @@
+#!/usr/bin/env groovy
+// ─────────────────────────────────────────────────────────────────────────────
+// cluster-create  (jenkins-ocp4 repo)
+//
+// ── Two-repo model ─────────────────────────────────────────────────────────
+//   1. Jenkins repo  (this file's home) — checked out automatically by SCM
+//   2. Terraform repo (ocp4-upi-powervm) — checked out into tf/ subdir
+//
+// ── Variable split ─────────────────────────────────────────────────────────
+//   tf-base-vars credential  → -var-file  → network, OCP tarball URLs, features…
+//                                           (node sizing placeholders overridden below)
+//   Jenkins credentials      → TF_VAR_*   → auth_url, domain_name
+//   Job parameters (user)    → TF_VAR_*   → user_name (POWERVC_USERNAME),
+//                                           password  (POWERVC_PASSWORD)
+//   Job parameters (user)    → -var flags  → rhel_subscription_* (optional,
+//                                           only injected when enabled)
+//   Job parameters           → -var flags  → tenant_name, cluster_id,
+//                                           cluster_id_prefix, cluster_domain,
+//                                           bastion{}, bootstrap{}, master{},
+//                                           worker{} (instance_type, image_id, count)
+//   Host SSH keys            → -var flags  → public_key_file, private_key_file
+//                                           ($HOME/.ssh/id_rsa[.pub])
+//
+// ── State files ────────────────────────────────────────────────────────────
+//   Backend : local, path set in terraform-backend-config credential
+//   Default : /opt/terraform_states/terraform.tfstate
+//   Per-ws  : /opt/terraform_states/terraform.tfstate.d/<workspace>/
+//
+// ── Concurrent builds on the same host ─────────────────────────────────────
+//   Jenkins isolates builds into separate workspace dirs automatically:
+//     /var/jenkins_home/workspace/cluster-create/      ← build A
+//     /var/jenkins_home/workspace/cluster-create@2/    ← build B
+//   Each has its own tf/, tf/data/, and plan files — no shared mutable state.
+//   TF_PLUGIN_CACHE_DIR is shared (read-only, OS-locked) to skip re-downloads.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Job parameters (includes user-supplied credentials) ───────────────────────
+// Password parameters are automatically masked in the build log by Jenkins.
+properties([
+    parameters([
+        string(
+            name        : 'TENANT_NAME',
+            defaultValue: '',
+            description : 'Tenant / project name (e.g. my-team)'
+        ),
+        string(
+            name        : 'CLUSTER_ID_PREFIX',
+            defaultValue: '',
+            description : 'Short prefix for the cluster ID (e.g. dev)'
+        ),
+        string(
+            name        : 'CLUSTER_ID',
+            defaultValue: '',
+            description : 'Unique cluster identifier (e.g. ocp01)'
+        ),
+        string(
+            name        : 'CLUSTER_DOMAIN',
+            defaultValue: '',
+            description : 'Optional base domain override'
+        ),
+        booleanParam(
+            name        : 'AUTO_APPROVE',
+            defaultValue: false,
+            description : 'Skip the manual approval gate'
+        ),
+        // ── PowerVC credentials (per user) ────────────────────────────────────
+        string(
+            name        : 'POWERVC_USERNAME',
+            defaultValue: '',
+            description : 'PowerVC / OpenStack username'
+        ),
+        password(
+            name        : 'POWERVC_PASSWORD',
+            defaultValue: '',
+            description : 'PowerVC / OpenStack password'
+        ),
+        // ── RHEL subscription (per user, optional) ────────────────────────────
+        booleanParam(
+            name        : 'RHEL_SUBSCRIPTION_ENABLED',
+            defaultValue: false,
+            description : 'Attach RHEL subscription on provisioned nodes'
+        ),
+        string(
+            name        : 'RHEL_SUB_USER',
+            defaultValue: '',
+            description : 'Red Hat subscription username (required when RHEL_SUBSCRIPTION_ENABLED)'
+        ),
+        password(
+            name        : 'RHEL_SUB_PASS',
+            defaultValue: '',
+            description : 'Red Hat subscription password (required when RHEL_SUBSCRIPTION_ENABLED)'
+        ),
+        // ── Node sizing (passed as Terraform object variables) ────────────────
+        // instance_type : PowerVC compute template name
+        // image_id      : PowerVC image UUID
+        // count         : number of VMs to create
+        string(
+            name        : 'BASTION_INSTANCE_TYPE',
+            defaultValue: '',
+            description : 'PowerVC compute template for the bastion node'
+        ),
+        string(
+            name        : 'BASTION_IMAGE_ID',
+            defaultValue: '',
+            description : 'PowerVC image UUID for the bastion node (RHEL image)'
+        ),
+        string(
+            name        : 'BASTION_COUNT',
+            defaultValue: '1',
+            description : 'Number of bastion nodes'
+        ),
+        string(
+            name        : 'BOOTSTRAP_INSTANCE_TYPE',
+            defaultValue: '',
+            description : 'PowerVC compute template for the bootstrap node'
+        ),
+        string(
+            name        : 'BOOTSTRAP_IMAGE_ID',
+            defaultValue: '',
+            description : 'PowerVC image UUID for the bootstrap node (RHCOS image)'
+        ),
+        string(
+            name        : 'BOOTSTRAP_COUNT',
+            defaultValue: '1',
+            description : 'Number of bootstrap nodes (always 1 for OCP UPI)'
+        ),
+        string(
+            name        : 'MASTER_INSTANCE_TYPE',
+            defaultValue: '',
+            description : 'PowerVC compute template for master nodes'
+        ),
+        string(
+            name        : 'MASTER_IMAGE_ID',
+            defaultValue: '',
+            description : 'PowerVC image UUID for master nodes (RHCOS image)'
+        ),
+        string(
+            name        : 'MASTER_COUNT',
+            defaultValue: '3',
+            description : 'Number of master (control-plane) nodes'
+        ),
+        string(
+            name        : 'WORKER_INSTANCE_TYPE',
+            defaultValue: '',
+            description : 'PowerVC compute template for worker nodes'
+        ),
+        string(
+            name        : 'WORKER_IMAGE_ID',
+            defaultValue: '',
+            description : 'PowerVC image UUID for worker nodes (RHCOS image)'
+        ),
+        string(
+            name        : 'WORKER_COUNT',
+            defaultValue: '2',
+            description : 'Number of worker (compute) nodes'
+        )
+    ])
+])
+
+node('terraform') {
+
+    def wsName = ''
+
+    // ── Validate ──────────────────────────────────────────────────────────────
+    stage('Validate Parameters') {
+        def errors = []
+        if (!params.TENANT_NAME?.trim())       errors << '  • TENANT_NAME is required'
+        if (!params.CLUSTER_ID_PREFIX?.trim()) errors << '  • CLUSTER_ID_PREFIX is required'
+        if (!params.CLUSTER_ID?.trim())        errors << '  • CLUSTER_ID is required'
+        if (!params.POWERVC_USERNAME?.trim())  errors << '  • POWERVC_USERNAME is required'
+        if (!params.POWERVC_PASSWORD?.trim())  errors << '  • POWERVC_PASSWORD is required'
+        if (params.RHEL_SUBSCRIPTION_ENABLED) {
+            if (!params.RHEL_SUB_USER?.trim()) errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
+            if (!params.RHEL_SUB_PASS?.trim()) errors << '  • RHEL_SUB_PASS is required when RHEL_SUBSCRIPTION_ENABLED'
+        }
+        // Node sizing
+        [
+            [prefix: 'BASTION',    label: 'bastion'],
+            [prefix: 'BOOTSTRAP',  label: 'bootstrap'],
+            [prefix: 'MASTER',     label: 'master'],
+            [prefix: 'WORKER',     label: 'worker'],
+        ].each { node ->
+            if (!params["${node.prefix}_INSTANCE_TYPE"]?.trim())
+                errors << "  • ${node.prefix}_INSTANCE_TYPE is required"
+            if (!params["${node.prefix}_IMAGE_ID"]?.trim())
+                errors << "  • ${node.prefix}_IMAGE_ID is required"
+            def cnt = params["${node.prefix}_COUNT"]?.trim()
+            if (!cnt || !(cnt ==~ /^[1-9][0-9]*$/))
+                errors << "  • ${node.prefix}_COUNT must be a positive integer (got: '${cnt}')"
+        }
+        if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
+
+        wsName = "${params.TENANT_NAME}-${params.CLUSTER_ID_PREFIX}-${params.CLUSTER_ID}"
+        if (!(wsName ==~ /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,89}$/)) {
+            error("Workspace name '${wsName}' is invalid (alphanumeric/dash/underscore, ≤90 chars, start alphanumeric).")
+        }
+
+        currentBuild.displayName = "#${env.BUILD_NUMBER} | ${wsName}"
+        currentBuild.description = "Create: ${wsName}"
+        echo "Workspace    : ${wsName}"
+        echo "Auto-approve : ${params.AUTO_APPROVE}"
+        if (params.CLUSTER_DOMAIN?.trim()) echo "Domain       : ${params.CLUSTER_DOMAIN}"
+        echo "RHEL sub     : ${params.RHEL_SUBSCRIPTION_ENABLED ? 'enabled' : 'disabled'}"
+    }
+
+    // ── Checkout Jenkins repo ─────────────────────────────────────────────────
+    // SCM checkout happens automatically for the Jenkinsfile itself; calling
+    // checkout scm here ensures the workspace is clean and up-to-date.
+    stage('Checkout') {
+        checkout scm
+
+        // Ensure the shared provider cache dir exists on first run.
+        sh 'mkdir -p "${TF_PLUGIN_CACHE_DIR}"'
+
+        // Checkout the Terraform repo into the tf/ subdirectory.
+        // CleanBeforeCheckout removes any leftover files from previous builds
+        // (including the dynamically generated backend.tf).
+        dir('tf') {
+            checkout([
+                $class           : 'GitSCM',
+                branches         : [[name: "*/${env.TF_REPO_BRANCH}"]],
+                userRemoteConfigs: [[url: env.TF_REPO_URL, credentialsId: 'git-credentials']],
+                extensions       : [[$class: 'CleanBeforeCheckout']]
+            ])
+
+            // ── Inject backend.tf ─────────────────────────────────────────────
+            // This file is NOT committed to the terraform repo; it is generated
+            // here in the Jenkins workspace on every build.
+            // The actual path is supplied via -backend-config at terraform init.
+            writeFile file: 'backend.tf', text: '''\
+                # Generated by Jenkins pipeline — do not commit to the terraform repo.
+                terraform {
+                  backend "local" {}
+                }
+                '''.stripIndent()
+
+            sh 'mkdir -p data'
+        }
+    }
+
+    // ── Per-cluster lock ───────────────────────────────────────────────────────
+    // Spans Init → Plan → (Approval) → Apply atomically.
+    // Builds for DIFFERENT clusters run in parallel (different resource names).
+    // A second build for the SAME cluster queues here, preventing stale plans.
+    lock(resource: "tf-workspace-${wsName}", inversePrecedence: false) {
+
+        // ── Terraform Init ────────────────────────────────────────────────────
+        stage('Terraform Init') {
+            dir('tf') {
+                withCredentials([
+                    file(credentialsId: 'ocp-pull-secret',          variable: 'PULL_SECRET_SRC'),
+                    file(credentialsId: 'terraform-backend-config',  variable: 'TF_BACKEND_CFG')
+                ]) {
+                    sh '''
+                        # Pull secret written to path expected by the base var file:
+                        #   pull_secret_file = "data/pull-secret.txt"
+                        cp "${PULL_SECRET_SRC}" data/pull-secret.txt
+                        chmod 600 data/pull-secret.txt
+
+                        echo "=== terraform init ==="
+                        terraform init \
+                            -no-color \
+                            -reconfigure \
+                            -input=false \
+                            -backend-config="${TF_BACKEND_CFG}"
+                    '''
+                }
+            }
+        }
+
+        // ── Workspace Setup ───────────────────────────────────────────────────
+        stage('Workspace Setup') {
+            dir('tf') {
+                sh """
+                    echo "=== workspace: ${wsName} ==="
+                    terraform workspace new '${wsName}' -no-color 2>&1 \
+                        || terraform workspace select '${wsName}' -no-color
+                    echo "Active: \$(terraform workspace show)"
+                """
+            }
+        }
+
+        // ── Terraform Plan ────────────────────────────────────────────────────
+        stage('Terraform Plan') {
+            dir('tf') {
+                // PowerVC and RHEL creds come from job parameters (user-supplied).
+                // Other env-level secrets (auth URL, domain, var file) stay in
+                // the Jenkins credential store.
+                withEnv([
+                    "TF_VAR_user_name=${params.POWERVC_USERNAME}",
+                    "TF_VAR_password=${params.POWERVC_PASSWORD}"
+                ]) {
+                withCredentials([
+                    string(credentialsId: 'powervc-auth-url',    variable: 'TF_VAR_auth_url'),
+                    string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
+                    file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
+                ]) {
+                    // ── Build the -var flag list ───────────────────────────────
+                    // Per-cluster identity vars override anything in the var file.
+                    // SSH key paths point to the host's ~/.ssh/ (mounted into the
+                    // container at /var/jenkins_home/.ssh/).
+                    def clusterVars = [
+                        "-var 'tenant_name=${params.TENANT_NAME}'",
+                        "-var 'cluster_id=${params.CLUSTER_ID}'",
+                        "-var 'cluster_id_prefix=${params.CLUSTER_ID_PREFIX}'",
+                        "-var \"public_key_file=\${HOME}/.ssh/id_rsa.pub\"",
+                        "-var \"private_key_file=\${HOME}/.ssh/id_rsa\""
+                    ]
+                    if (params.CLUSTER_DOMAIN?.trim()) {
+                        clusterVars << "-var 'cluster_domain=${params.CLUSTER_DOMAIN}'"
+                    }
+                    // RHEL subscription: inject only when enabled and creds are provided.
+                    // Skipped when disabled — Terraform uses empty defaults from the base
+                    // var file.
+                    if (params.RHEL_SUBSCRIPTION_ENABLED && params.RHEL_SUB_USER?.trim()) {
+                        clusterVars += [
+                            "-var 'rhel_subscription_username=${params.RHEL_SUB_USER}'",
+                            "-var 'rhel_subscription_password=${params.RHEL_SUB_PASS}'"
+                        ]
+                    }
+                    // Node sizing: passed as Terraform object variables so they override
+                    // the placeholder values in the base var file.
+                    // count is an integer — no quotes; instance_type and image_id are strings.
+                    clusterVars += [
+                        "-var 'bastion={instance_type=\"${params.BASTION_INSTANCE_TYPE}\",image_id=\"${params.BASTION_IMAGE_ID}\",count=${params.BASTION_COUNT}}'",
+                        "-var 'bootstrap={instance_type=\"${params.BOOTSTRAP_INSTANCE_TYPE}\",image_id=\"${params.BOOTSTRAP_IMAGE_ID}\",count=${params.BOOTSTRAP_COUNT}}'",
+                        "-var 'master={instance_type=\"${params.MASTER_INSTANCE_TYPE}\",image_id=\"${params.MASTER_IMAGE_ID}\",count=${params.MASTER_COUNT}}'",
+                        "-var 'worker={instance_type=\"${params.WORKER_INSTANCE_TYPE}\",image_id=\"${params.WORKER_IMAGE_ID}\",count=${params.WORKER_COUNT}}'"
+                    ]
+
+                    withEnv(["TF_IN_AUTOMATION=true"]) {
+                        sh """
+                            echo "=== terraform plan ==="
+                            terraform plan \\
+                                -no-color \\
+                                -input=false \\
+                                -var-file="\${TF_BASE_VARS_FILE}" \\
+                                ${clusterVars.join(' \\\n                                ')} \\
+                                -out='${wsName}.tfplan'
+                        """
+                    }
+                } // end withCredentials
+                } // end withEnv (PowerVC creds)
+            }
+        }
+
+        // ── Approval ──────────────────────────────────────────────────────────
+        if (!params.AUTO_APPROVE) {
+            stage('Approval') {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input(
+                        message : "Apply cluster '${wsName}'? Review the plan above.",
+                        ok      : 'Approve and Apply',
+                        submitter: 'admin,ops-team'
+                    )
+                }
+            }
+        }
+
+        // ── Terraform Apply ───────────────────────────────────────────────────
+        stage('Terraform Apply') {
+            dir('tf') {
+                // Provider credentials are needed even for plan-file applies
+                // (Terraform re-authenticates to build the provider client).
+                withEnv([
+                    "TF_VAR_user_name=${params.POWERVC_USERNAME}",
+                    "TF_VAR_password=${params.POWERVC_PASSWORD}"
+                ]) {
+                withCredentials([
+                    string(credentialsId: 'powervc-auth-url',    variable: 'TF_VAR_auth_url'),
+                    string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name')
+                ]) {
+                    withEnv(["TF_IN_AUTOMATION=true"]) {
+                        sh """
+                            echo "=== terraform apply ==="
+                            # All variable values were baked into the plan file.
+                            # No -var flags needed here.
+                            terraform apply \\
+                                -no-color \\
+                                -input=false \\
+                                -auto-approve \\
+                                '${wsName}.tfplan'
+                        """
+                    }
+                } // end withCredentials
+                } // end withEnv (PowerVC creds)
+            }
+        }
+
+    } // end lock
+
+    // ── Cluster Info ──────────────────────────────────────────────────────────
+    stage('Cluster Info') {
+        dir('tf') {
+            withEnv(["TF_IN_AUTOMATION=true"]) {
+                sh """
+                    terraform workspace select '${wsName}' -no-color
+                    echo "=== cluster outputs ==="
+                    terraform output -no-color -json | tee "../cluster-outputs-${wsName}.json"
+                """
+            }
+        }
+        archiveArtifacts(
+            artifacts        : "cluster-outputs-${wsName}.json",
+            allowEmptyArchive: true,
+            fingerprint      : true
+        )
+        echo "Cluster '${wsName}' created successfully."
+    }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
+    sh "rm -f tf/'${wsName}.tfplan' tf/data/pull-secret.txt || true"
+
+} // end node
