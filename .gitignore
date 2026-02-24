@@ -1,0 +1,7 @@
+# Local env files — contain secrets, never commit
+.jenkins.env*
+*.env
+*.env.local
+
+# macOS
+.DS_Store
