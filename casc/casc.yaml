@@ -154,11 +154,11 @@ jobs:
                 }
                 branch(System.getenv('JENKINS_REPO_BRANCH') ?: 'main')
                 extensions {
-                  cloneOption { shallow(true); depth(1); timeout(10) }
+                  cloneOption { shallow(true); depth(1); timeout(10); noTags(false); reference('') }
                 }
               }
             }
-            scriptPath('jobs/seed.groovy')
+            scriptPath('pipelines/Jenkinsfile.seed')
             lightweight(false)
           }
         }

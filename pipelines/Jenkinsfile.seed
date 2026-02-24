@@ -1,0 +1,22 @@
+#!/usr/bin/env groovy
+// ─────────────────────────────────────────────────────────────────────────────
+// Seed pipeline — executed by the _seed-jobs Pipeline job.
+//
+// Does two things:
+//   1. Full checkout of the jenkins-ocp4 repo into the workspace.
+//   2. Runs jobs/seed.groovy via the Job DSL step, which creates / updates
+//      the cluster-create and cluster-destroy pipeline jobs.
+//
+// The Job DSL step must run outside the sandbox (sandbox: false) because
+// seed scripts use Job DSL APIs that are not available in the CPS sandbox.
+// ─────────────────────────────────────────────────────────────────────────────
+
+node {
+    checkout scm
+
+    jobDsl(
+        targets         : 'jobs/seed.groovy',
+        sandbox         : false,
+        removedJobAction: 'IGNORE'
+    )
+}
