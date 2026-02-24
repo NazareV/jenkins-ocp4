@@ -128,7 +128,7 @@ unclassified:
   ansiColorBuildWrapper:
     globalColorMapName: "xterm"
 
-  timestamperConfig:
+  timestamper:
     allPipelines: true
 
   lockableResourcesManager:

@@ -16,7 +16,7 @@ node {
 
     jobDsl(
         targets         : 'jobs/seed.groovy',
-        sandbox         : false,
+        sandbox         : true,
         removedJobAction: 'IGNORE'
     )
 }
