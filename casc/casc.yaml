@@ -32,13 +32,6 @@ jenkins:
     loggedInUsersCanDoAnything:
       allowAnonymousRead: false
 
-  # ── authorize-project: run builds as the user who triggered them ────────────
-  # Required for jobDsl sandbox:true — the DSL sandbox needs an identity to run as.
-  queueItemAuthenticator:
-    authenticators:
-      - global:
-          strategy: triggeringUsersAuthorizationStrategy
-
   # ── Global non-secret environment variables ─────────────────────────────────
   globalNodeProperties:
     - envVars:
@@ -142,6 +135,13 @@ unclassified:
     declaredResources:
       - name: "tf-provider-init"
         description: "Serializes first provider download when the plugin cache is cold."
+
+  # ── authorize-project: run builds as the user who triggered them ────────────
+  # Required for jobDsl sandbox:true — the DSL sandbox needs an identity to run as.
+  queueItemAuthenticator:
+    authenticators:
+      - global:
+          strategy: triggeringUsersAuthorizationStrategy
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap: create the seed job
