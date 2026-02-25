@@ -99,6 +99,15 @@ node('terraform') {
                 sh '''
                     chmod 600 data/pull-secret.txt
 
+                    echo "=== backend config ==="
+                    cat "${TF_BACKEND_CFG}"
+                    if [ ! -s "${TF_BACKEND_CFG}" ]; then
+                        echo "ERROR: terraform-backend-config credential is empty."
+                        echo "  Set TF_BACKEND_CONFIG_B64 in your Jenkins env file."
+                        echo "  Example: printf 'path = \"/opt/terraform_states/terraform.tfstate\"\\n' | base64"
+                        exit 1
+                    fi
+
                     echo "=== terraform init ==="
                     terraform init \
                         -no-color \
