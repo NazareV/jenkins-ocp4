@@ -96,7 +96,7 @@ pipelineJob('cluster-create') {
                     }
                     branch(jenkinsRepoBranch)
                     extensions {
-                        cloneOption { shallow(false); depth(0); timeout(15) }
+                        cloneOption { shallow(false); depth(0); timeout(15); noTags(false); reference('') }
                         cleanBeforeCheckout()
                     }
                 }
@@ -179,7 +179,7 @@ pipelineJob('cluster-destroy') {
                     }
                     branch(jenkinsRepoBranch)
                     extensions {
-                        cloneOption { shallow(false); depth(0); timeout(15) }
+                        cloneOption { shallow(false); depth(0); timeout(15); noTags(false); reference('') }
                         cleanBeforeCheckout()
                     }
                 }
