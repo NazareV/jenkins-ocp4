@@ -271,8 +271,8 @@ docker start jenkins-ocp4
 |--------|-----------|---------------------|
 | Jenkins credential `powervc-domain-name` | `TF_VAR_domain_name` | `domain_name` |
 | Jenkins credential `tf-base-vars` | `-var-file` | `network_name`, OCP tarball URLs, `cluster_domain` (default), features… |
-| Job parameters | `TF_VAR_*` env vars | `auth_url`, `user_name`, `password`, `openstack_availability_zone` |
-| Job parameters | `-var` flags | `tenant_name`, `cluster_id`, `cluster_id_prefix`, `cluster_domain` (override), node sizing |
+| Job parameters | `TF_VAR_password` env var | `password` (kept as env var — value must not appear on command line) |
+| Job parameters | `-var` flags | `auth_url`, `user_name`, `openstack_availability_zone`, `tenant_name`, `cluster_id`, `cluster_id_prefix`, `cluster_domain` (override), node sizing |
 | Job parameters | `-var` flags (optional) | `rhel_subscription_username`, `rhel_subscription_password` |
 | Host `~/.ssh/` | `-var` flags | `public_key_file`, `private_key_file` |
 

@@ -147,17 +147,18 @@ node('terraform') {
         // ── Terraform Plan Destroy ────────────────────────────────────────────
         stage('Terraform Plan Destroy') {
             dir('tf') {
+                wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'TF_VAR_password']]]) {
                 withEnv([
-                    "TF_VAR_auth_url=${params.POWERVC_AUTH_URL}",
-                    "TF_VAR_user_name=${params.POWERVC_USERNAME}",
-                    "TF_VAR_password=${params.POWERVC_PASSWORD}",
-                    "TF_VAR_openstack_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
+                    "TF_VAR_password=${params.POWERVC_PASSWORD}"
                 ]) {
                 withCredentials([
                     string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
                     file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
                 ]) {
                     def clusterVars = [
+                        "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
+                        "-var 'user_name=${params.POWERVC_USERNAME}'",
+                        "-var 'openstack_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}'",
                         "-var 'tenant_name=${params.TENANT_NAME}'",
                         "-var 'cluster_id=${params.CLUSTER_ID}'",
                         "-var 'cluster_id_prefix=${params.CLUSTER_ID_PREFIX}'",
@@ -188,6 +189,7 @@ node('terraform') {
                     }
                 } // end withCredentials
                 } // end withEnv
+                } // end wrap
             }
         }
 
