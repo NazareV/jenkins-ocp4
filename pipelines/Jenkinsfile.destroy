@@ -212,22 +212,30 @@ node('terraform') {
         }
 
         // ── Terraform Destroy ─────────────────────────────────────────────────
-        // Passes var-files and -var flags directly — no saved plan file.
-        // Each retry runs against current state, avoiding stale-plan errors.
+        // Plan and apply-destroy are combined inside retry() so each attempt
+        // generates a fresh destroy plan from current state.  Resources already
+        // removed in a prior attempt are excluded from the new plan.
         stage('Terraform Destroy') {
             dir('tf') {
                 wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
                     withEnv(["TF_IN_AUTOMATION=true"]) {
                         retry(retryCnt) {
                             sh """
-                                echo "=== terraform destroy (attempt) ==="
+                                echo "=== terraform plan -destroy (attempt) ==="
+                                terraform plan \\
+                                    -no-color \\
+                                    -input=false \\
+                                    -destroy \\
+                                    -var-file="base-vars.tfvars" \\
+                                    ${clusterVars.join(' \\\n                                    ')} \\
+                                    -out='${wsName}-destroy.tfplan'
+
+                                echo "=== terraform apply (destroy, attempt) ==="
                                 terraform apply \\
                                     -no-color \\
                                     -input=false \\
                                     -auto-approve \\
-                                    -destroy \\
-                                    -var-file="base-vars.tfvars" \\
-                                    ${clusterVars.join(' \\\n                                    ')}
+                                    '${wsName}-destroy.tfplan'
                             """
                         }
                     }

@@ -397,9 +397,12 @@ node('terraform') {
         }
 
         // ── Terraform Apply ───────────────────────────────────────────────────
-        // Passes var-files and -var flags directly instead of a saved plan file.
-        // Each retry runs terraform apply against current state, so a partial
-        // apply from the previous attempt never causes a "stale plan" error.
+        // Plan and apply are combined inside retry() so each attempt generates
+        // a fresh plan from current state.  This prevents two failure modes:
+        //   • Stale plan  — plan file from the prior attempt is out of date
+        //   • Duplicates  — apply-without-plan can't detect orphaned cloud
+        //                   resources that exist but are absent from state
+        // The Terraform Plan stage above is kept for operator review/approval.
         // On final failure, a destroy cleans up any partially-created resources.
         stage('Terraform Apply') {
             dir('tf') {
@@ -408,14 +411,21 @@ node('terraform') {
                         try {
                             retry(retryCnt) {
                                 sh """
+                                    echo "=== terraform plan (attempt) ==="
+                                    terraform plan \\
+                                        -no-color \\
+                                        -input=false \\
+                                        -var-file="base-vars.tfvars" \\
+                                        -var-file="node-vars.tfvars" \\
+                                        ${clusterVars.join(' \\\n                                        ')} \\
+                                        -out='${wsName}.tfplan'
+
                                     echo "=== terraform apply (attempt) ==="
                                     terraform apply \\
                                         -no-color \\
                                         -input=false \\
                                         -auto-approve \\
-                                        -var-file="base-vars.tfvars" \\
-                                        -var-file="node-vars.tfvars" \\
-                                        ${clusterVars.join(' \\\n                                        ')}
+                                        '${wsName}.tfplan'
                                 """
                             }
                         } catch (applyErr) {
