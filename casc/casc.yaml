@@ -68,6 +68,23 @@ credentials:
               secretBytes: "${TF_BACKEND_CONFIG_B64}"
               description: "Terraform backend config (.hcl) → passed to terraform init -backend-config"
 
+          # ── SSH keys for Terraform ─────────────────────────────────────────
+          # Base64-encode on the CentOS host (Linux):
+          #   export SSH_PRIVATE_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa)
+          #   export SSH_PUBLIC_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa.pub)
+          - file:
+              scope: GLOBAL
+              id: "jenkins-ssh-private-key"
+              fileName: "id_rsa"
+              secretBytes: "${SSH_PRIVATE_KEY_B64}"
+              description: "SSH private key — written to build workspace at runtime"
+          - file:
+              scope: GLOBAL
+              id: "jenkins-ssh-public-key"
+              fileName: "id_rsa.pub"
+              secretBytes: "${SSH_PUBLIC_KEY_B64}"
+              description: "SSH public key — written to build workspace at runtime"
+
           # ── Git credentials ────────────────────────────────────────────────
           - usernamePassword:
               scope: GLOBAL

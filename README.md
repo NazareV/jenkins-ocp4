@@ -128,21 +128,20 @@ anything in this file — you may leave them out to keep the file clean:
 
 ---
 
-### Step 4 — Encode the backend config
+### Step 4 — Encode credentials
 
-Only the Terraform backend config needs to be base64-encoded (it is stored as a Jenkins credential).
+The Terraform backend config and SSH keys are stored as Jenkins file credentials (base64-encoded).
 The pull secret and base vars are supplied directly as job parameters.
 
 ```bash
-# macOS
-cp backend/local-persistent.hcl.example backend.hcl
-export TF_BACKEND_CONFIG_B64=$(base64 -b 0 backend.hcl)
-rm backend.hcl
-
-# Linux
+# Terraform backend config
 cp backend/local-persistent.hcl.example backend.hcl
 export TF_BACKEND_CONFIG_B64=$(base64 -w0 backend.hcl)
 rm backend.hcl
+
+# SSH keys (run on the CentOS host where the keys live)
+export SSH_PRIVATE_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa)
+export SSH_PUBLIC_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa.pub)
 ```
 
 ---
@@ -169,6 +168,8 @@ GIT_USERNAME=<your-git-username>
 GIT_TOKEN=<your-git-pat>
 
 TF_BACKEND_CONFIG_B64=<value from step 4>
+SSH_PRIVATE_KEY_B64=<value from step 4>
+SSH_PUBLIC_KEY_B64=<value from step 4>
 ```
 
 > `POWERVC_AUTH_URL`, `POWERVC_USERNAME`, `POWERVC_PASSWORD`, `OPENSTACK_AVAILABILITY_ZONE`,
@@ -199,10 +200,11 @@ docker run -d \
   -v jenkins_home:/var/jenkins_home \
   -v $(pwd)/casc:/var/jenkins_home/casc:ro \
   -v /opt/terraform_states:/opt/terraform_states \
-  -v ~/.ssh/id_rsa:/var/jenkins_home/.ssh/id_rsa:ro \
-  -v ~/.ssh/id_rsa.pub:/var/jenkins_home/.ssh/id_rsa.pub:ro \
   jenkins-ocp4:local
 ```
+
+> SSH keys are injected via `SSH_PRIVATE_KEY_B64` / `SSH_PUBLIC_KEY_B64` in `.jenkins.env` and stored
+> as Jenkins file credentials — no SSH volume mount needed.
 
 ---
 

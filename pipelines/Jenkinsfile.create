@@ -253,14 +253,18 @@ node('terraform') {
             sh 'rm -f .terraform.lock.hcl && mkdir -p data'
         }
 
-        // Copy SSH keys to workspace with read permissions.
-        // The :ro mount from the host may not be readable by the jenkins uid;
-        // a local copy with chmod 400 guarantees access during the build.
-        sh """
-            cp "\$HOME/.ssh/id_rsa"     ssh_id_rsa
-            cp "\$HOME/.ssh/id_rsa.pub" ssh_id_rsa.pub
-            chmod 400 ssh_id_rsa
-        """
+        // Write SSH keys from Jenkins credentials into the workspace.
+        // Avoids uid-mismatch permission issues with volume-mounted host keys.
+        withCredentials([
+            file(credentialsId: 'jenkins-ssh-private-key', variable: 'SSH_PRIV'),
+            file(credentialsId: 'jenkins-ssh-public-key',  variable: 'SSH_PUB')
+        ]) {
+            sh """
+                cp "\${SSH_PRIV}" ssh_id_rsa
+                cp "\${SSH_PUB}"  ssh_id_rsa.pub
+                chmod 400 ssh_id_rsa
+            """
+        }
     }
 
     // ── Per-cluster lock ───────────────────────────────────────────────────────
