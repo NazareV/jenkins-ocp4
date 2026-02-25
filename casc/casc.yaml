@@ -50,8 +50,10 @@ jenkins:
 
           # Shared provider binary cache — safe for concurrent builds
           # (Terraform uses OS file locking inside this directory)
+          # Path is outside jenkins_home so the volume mount does not hide it;
+          # providers are pre-downloaded into this directory during image build.
           - key: "TF_PLUGIN_CACHE_DIR"
-            value: "/var/jenkins_home/.terraform-plugin-cache"
+            value: "/opt/terraform-plugin-cache"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Credentials

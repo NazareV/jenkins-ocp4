@@ -18,11 +18,36 @@ RUN wget -q "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terra
     chmod +x /usr/local/bin/terraform && \
     terraform version
 
+# ── Provider cache directory ───────────────────────────────────────────────────
+# Outside /var/jenkins_home so it is NOT hidden by the volume mount at runtime.
+# Pre-populated at build time; pipeline builds find providers without downloading.
+RUN mkdir -p /opt/terraform-plugin-cache && \
+    chown jenkins:jenkins /opt/terraform-plugin-cache
+
 # ── Jenkins plugins ───────────────────────────────────────────────────────────
 USER jenkins
 
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
 RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
+
+# ── Pre-warm Terraform provider cache ─────────────────────────────────────────
+# Downloads the two providers required by ocp4-upi-powervm at image build time
+# so that pipeline "terraform init" runs without internet access on every build.
+# Mirrors versions.tf in the terraform repo:
+#   terraform-provider-openstack/openstack ~> 1.32
+#   hashicorp/random                       ~> 3.4
+ENV TF_PLUGIN_CACHE_DIR=/opt/terraform-plugin-cache
+
+RUN mkdir -p /tmp/tf-warmup && \
+    printf '%s\n' \
+        'terraform {' \
+        '  required_providers {' \
+        '    openstack = { source = "terraform-provider-openstack/openstack", version = "~> 1.32" }' \
+        '    random    = { source = "hashicorp/random", version = "~> 3.4" }' \
+        '  }' \
+        '}' > /tmp/tf-warmup/versions.tf && \
+    terraform -chdir=/tmp/tf-warmup init -no-color && \
+    rm -rf /tmp/tf-warmup
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 # Skip setup wizard — JCasC handles all configuration at startup.
