@@ -170,23 +170,25 @@ Copy `.jenkins.env.local` as a template (it is gitignored).
 
 ## Quick start
 
-```bash
-# 1. Build the image
-docker build -t jenkins-ocp4:local docker/
+> **macOS note:** replace `base64 -w0` with `base64 -b 0` throughout.
 
-# 2. Prepare credentials (run once)
+```bash
+# 1. Build the image (downloads Terraform providers at build time — needs internet once)
+docker build --no-cache -t jenkins-ocp4:local docker/
+
+# 2. Prepare credentials (run once per environment)
 #    a. Strip secret keys from var.tfvars → base.tfvars (see Variable split above)
 #    b. Encode everything
-export OCP_PULL_SECRET_BASE64=$(base64 -w0 ~/pull-secret.txt)
-export TF_BASE_VARS_B64=$(base64 -w0 base.tfvars)
+export OCP_PULL_SECRET_BASE64=$(base64 -w0 ~/pull-secret.txt)   # macOS: base64 -b 0
+export TF_BASE_VARS_B64=$(base64 -w0 base.tfvars)               # macOS: base64 -b 0
 
 cp backend/local-persistent.hcl.example backend.hcl
-export TF_BACKEND_CONFIG_B64=$(base64 -w0 backend.hcl)
+export TF_BACKEND_CONFIG_B64=$(base64 -w0 backend.hcl)          # macOS: base64 -b 0
 rm backend.hcl
 
 # 3. Create host state directory
 sudo mkdir -p /opt/terraform_states
-sudo chown 1000:1000 /opt/terraform_states
+sudo chown 1000:1000 /opt/terraform_states   # uid 1000 = jenkins user inside container
 
 # 4. Create env file (never commit)
 cp .jenkins.env.local .jenkins.env   # edit with real values
@@ -203,8 +205,22 @@ docker run -d \
   -v ~/.ssh/id_rsa.pub:/var/jenkins_home/.ssh/id_rsa.pub:ro \
   jenkins-ocp4:local
 
-# 6. Open http://localhost:8080
+# 6. Wait for Jenkins to be ready
+docker logs -f jenkins-ocp4 2>&1 | grep "fully up"
+
+# 7. Open http://localhost:8080
 ```
+
+### Terraform providers
+
+Both providers required by `ocp4-upi-powervm` are pre-downloaded into the image at build time and stored at `/opt/terraform-plugin-cache` (outside the volume mount so they are never overwritten). Every `terraform init` in the pipeline uses this cache without requiring internet access at runtime.
+
+| Provider | Version installed |
+|---|---|
+| `terraform-provider-openstack/openstack` | `~> 1.32` |
+| `hashicorp/random` | `~> 3.4` |
+
+If `versions.tf` in the Terraform repo changes its provider requirements, rebuild the image.
 
 ### One-time post-start configuration (authorize-project)
 
