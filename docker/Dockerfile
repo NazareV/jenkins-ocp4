@@ -14,7 +14,7 @@
 #   git clone https://github.com/rpsene/goconfig.git && source go.sh install 1.18
 #   (docs/automation_host_prereqs.md) can be used to set up the host Go env.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM golang:1.23 AS terraform-builder
+FROM golang:1.25 AS terraform-builder
 
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
@@ -29,7 +29,7 @@ RUN TAG=$(curl -s "https://api.github.com/repos/hashicorp/terraform/releases/lat
         https://github.com/hashicorp/terraform.git /tmp/terraform && \
     cd /tmp/terraform && \
     CGO_ENABLED=0 GOOS=linux GOARCH=ppc64le go build -o /tmp/terraform-ppc64le . && \
-    echo "Binary: $(file /tmp/terraform-ppc64le)"
+    ls -lh /tmp/terraform-ppc64le
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 — Jenkins runtime image
@@ -46,7 +46,7 @@ RUN apt-get update -qq && \
 
 # ── Terraform binary (linux/ppc64le, built from source in Stage 1) ────────────
 COPY --from=terraform-builder /tmp/terraform-ppc64le /usr/local/bin/terraform
-RUN chmod +x /usr/local/bin/terraform && file /usr/local/bin/terraform
+RUN chmod +x /usr/local/bin/terraform && ls -lh /usr/local/bin/terraform
 
 # ── Terraform providers (linux/ppc64le) ───────────────────────────────────────
 # Always downloads the LATEST release from ocp-power-automation/terraform-providers-power.
