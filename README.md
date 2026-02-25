@@ -55,11 +55,9 @@ Terraform runs inside the Jenkins container on the controller node. All provider
 |------|-------|
 | Docker | Running on the Jenkins host |
 | SSH key pair | `~/.ssh/id_rsa` + `~/.ssh/id_rsa.pub` on the Jenkins host |
-| OCP pull secret | Downloaded from Red Hat — `~/pull-secret.txt` |
-| `ocp4-upi-powervm` `var.tfvars` | Your populated copy of the Terraform var file |
+| OCP pull secret | JSON from console.redhat.com/openshift/install/pull-secret — pasted as a job parameter at build time |
+| `ocp4-upi-powervm` `var.tfvars` | Your populated copy of the Terraform var file — content pasted as `BASE_VARS_CONTENT` at build time |
 | Git PAT | Personal access token with `repo` read scope (or `unused` for public repos) |
-
-> **macOS note:** replace `base64 -w0` with `base64 -b 0` in all commands below.
 
 ---
 
@@ -85,24 +83,12 @@ This takes several minutes (Terraform compilation is ~5–10 min).
 
 ---
 
-### Step 3 — Prepare `base.tfvars`
+### Step 3 — Prepare the base var file content
 
-`base.tfvars` is your populated `ocp4-upi-powervm/var.tfvars` with the keys that Jenkins
-injects via other mechanisms removed. If those keys stay in the file, the file value
-silently overrides the Jenkins-injected value (Terraform precedence: `-var-file` beats `TF_VAR_*` env vars).
+The base var file contains infrastructure-wide Terraform settings that are the same across all cluster builds.
+You will paste its content directly into the `BASE_VARS_CONTENT` job parameter when triggering a build — no encoding required.
 
-**Start from your `var.tfvars` and remove these keys entirely:**
-
-```
-# All job-supplied values are injected as -var flags which always win over -var-file.
-# Nothing MUST be removed — but you may leave these out to keep the file clean:
-# auth_url, user_name, password, openstack_availability_zone
-# tenant_name, cluster_id, cluster_id_prefix, public_key_file, private_key_file
-# rhel_subscription_username, rhel_subscription_password
-# bastion, bootstrap, master, worker
-```
-
-**Keys to keep and populate with real values:**
+**Start from `ocp4-upi-powervm/var.tfvars` and keep these keys (populate with real values):**
 
 ```hcl
 ### Network
@@ -129,23 +115,33 @@ cluster_domain = "yourdomain.com"
 ```
 
 > `pull_secret_file = "data/pull-secret.txt"` must stay exactly as-is.
-> The pipeline writes the pull secret there at runtime from the `ocp-pull-secret` Jenkins credential.
+> The pipeline writes the pull secret there at runtime from the `OCP_PULL_SECRET` job parameter.
+
+The following keys are injected as `-var` flags (highest Terraform precedence) and safely override
+anything in this file — you may leave them out to keep the file clean:
+
+```
+# auth_url, user_name, password, openstack_availability_zone, domain_name
+# tenant_name, cluster_id, cluster_id_prefix, cluster_domain (override)
+# public_key_file, private_key_file
+# rhel_subscription_username, rhel_subscription_password
+# bastion, bootstrap, master, worker
+```
 
 ---
 
-### Step 4 — Encode credentials
+### Step 4 — Encode the backend config
+
+Only the Terraform backend config needs to be base64-encoded (it is stored as a Jenkins credential).
+The pull secret and base vars are supplied directly as job parameters.
 
 ```bash
 # macOS
-export OCP_PULL_SECRET_BASE64=$(base64 -b 0 ~/pull-secret.txt)
-export TF_BASE_VARS_B64=$(base64 -b 0 base.tfvars)
 cp backend/local-persistent.hcl.example backend.hcl
 export TF_BACKEND_CONFIG_B64=$(base64 -b 0 backend.hcl)
 rm backend.hcl
 
 # Linux
-export OCP_PULL_SECRET_BASE64=$(base64 -w0 ~/pull-secret.txt)
-export TF_BASE_VARS_B64=$(base64 -w0 base.tfvars)
 cp backend/local-persistent.hcl.example backend.hcl
 export TF_BACKEND_CONFIG_B64=$(base64 -w0 backend.hcl)
 rm backend.hcl
@@ -174,13 +170,11 @@ TF_REPO_BRANCH=main
 GIT_USERNAME=<your-git-username>
 GIT_TOKEN=<your-git-pat>
 
-OCP_PULL_SECRET_BASE64=<value from step 4>
-TF_BASE_VARS_B64=<value from step 4>
 TF_BACKEND_CONFIG_B64=<value from step 4>
 ```
 
 > `POWERVC_AUTH_URL`, `POWERVC_USERNAME`, `POWERVC_PASSWORD`, `OPENSTACK_AVAILABILITY_ZONE`,
-> and `POWERVC_DOMAIN_NAME` are **not** set here — they are job parameters or come from `base.tfvars`.
+> `OCP_PULL_SECRET`, and `BASE_VARS_CONTENT` are **not** set here — they are supplied as job parameters at build time.
 
 ---
 
@@ -262,15 +256,16 @@ docker start jenkins-ocp4
 
 | Source | Mechanism | Terraform variables |
 |--------|-----------|---------------------|
-| Jenkins credential `tf-base-vars` | `-var-file` | `network_name`, `domain_name`, OCP tarball URLs, `cluster_domain` (default), features… |
+| Job parameter `BASE_VARS_CONTENT` (multi-line text) | `-var-file` | `network_name`, `domain_name`, OCP tarball URLs, `cluster_domain` (default), `rhel_username`, features… |
 | Job parameters | `-var` flags | `auth_url`, `user_name`, `password`, `openstack_availability_zone`, `tenant_name`, `cluster_id`, `cluster_id_prefix`, `cluster_domain` (override), node sizing |
 | Job parameters | `-var` flags (optional) | `rhel_subscription_username`, `rhel_subscription_password` |
 | Host `~/.ssh/` | `-var` flags | `public_key_file`, `private_key_file` |
 
 **Terraform precedence (lowest → highest):** `TF_VAR_*` env vars → `-var-file` → `-var` flags.
 
-All variables are injected as `-var` flags (highest precedence) and safely override any value in `base.tfvars`.
+All connection and identity variables are injected as `-var` flags (highest precedence) and safely override any value in `BASE_VARS_CONTENT`.
 No `TF_VAR_*` env vars are used. `password` is masked in logs via `MaskPasswordsBuildWrapper`.
+`OCP_PULL_SECRET` is written to `data/pull-secret.txt` and never printed to the build log.
 
 ---
 
@@ -336,6 +331,8 @@ No shared mutable state on disk between concurrent builds.
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
+| `BASE_VARS_CONTENT` | — | Multi-line tfvars content (network, OCP URLs, cluster_domain default, etc.). Required. |
+| `OCP_PULL_SECRET` | — | OCP pull secret JSON from console.redhat.com. Required. Masked in logs. |
 | `TENANT_NAME` | — | OpenStack project (tenant) name. Required. |
 | `CLUSTER_ID_PREFIX` | — | Your initials + cluster type, e.g. `vn-sno` (SNO) or `vn-reg` (regular). Max 6 chars. Required. |
 | `CLUSTER_ID` | — | Unique cluster identifier, e.g. `cluster01`. Max 8 chars. Required. |
@@ -366,7 +363,7 @@ State file: `/opt/terraform_states/terraform.tfstate.d/<workspace>/terraform.tfs
 
 ### cluster-destroy
 
-Same identity + PowerVC connection + RHEL parameters as create, plus:
+Same parameters as create (`BASE_VARS_CONTENT`, `OCP_PULL_SECRET`, identity, PowerVC connection, RHEL), plus:
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|

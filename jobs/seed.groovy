@@ -49,6 +49,16 @@ pipelineJob('cluster-create') {
             'AUTO_APPROVE', false,
             'Skip the manual approval gate before terraform apply.'
         )
+        // ── Base var file content ────────────────────────────────────────────
+        textParam(
+            'BASE_VARS_CONTENT', '',
+            'Contents of base.tfvars — Terraform variables for network, OCP URLs, cluster domain, rhel_username, connection_timeout, and any optional settings. See var.tfvars in ocp4-upi-powervm for reference.'
+        )
+        // ── OCP pull secret ──────────────────────────────────────────────────
+        nonStoredPasswordParam(
+            'OCP_PULL_SECRET',
+            'OCP pull secret JSON from console.redhat.com/openshift/install/pull-secret. Required.'
+        )
         // ── PowerVC connection ───────────────────────────────────────────────
         stringParam(
             'POWERVC_AUTH_URL', '',
@@ -152,6 +162,16 @@ pipelineJob('cluster-destroy') {
         booleanParam(
             'DELETE_WORKSPACE', true,
             'Delete the Terraform workspace from the state directory after successful destroy.'
+        )
+        // ── Base var file content ────────────────────────────────────────────
+        textParam(
+            'BASE_VARS_CONTENT', '',
+            'Contents of base.tfvars — Terraform variables for network, OCP URLs, cluster domain, rhel_username, connection_timeout, and any optional settings. See var.tfvars in ocp4-upi-powervm for reference.'
+        )
+        // ── OCP pull secret ──────────────────────────────────────────────────
+        nonStoredPasswordParam(
+            'OCP_PULL_SECRET',
+            'OCP pull secret JSON from console.redhat.com/openshift/install/pull-secret. Required.'
         )
         // ── PowerVC connection ───────────────────────────────────────────────
         stringParam(

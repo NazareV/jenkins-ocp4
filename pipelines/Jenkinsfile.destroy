@@ -25,6 +25,8 @@ node('terraform') {
         if (!params.OPENSTACK_AVAILABILITY_ZONE?.trim())  errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
         if (!params.POWERVC_USERNAME?.trim())             errors << '  • POWERVC_USERNAME is required'
         if (!params.POWERVC_PASSWORD?.trim())             errors << '  • POWERVC_PASSWORD is required'
+        if (!params.OCP_PULL_SECRET?.trim())              errors << '  • OCP_PULL_SECRET is required'
+        if (!params.BASE_VARS_CONTENT?.trim())            errors << '  • BASE_VARS_CONTENT is required'
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 
         wsName = "${params.TENANT_NAME}-${params.CLUSTER_ID_PREFIX}-${params.CLUSTER_ID}"
@@ -68,12 +70,12 @@ node('terraform') {
     // Run BEFORE the confirmation gate so backend/config errors surface early.
     stage('Terraform Init') {
         dir('tf') {
+            writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET
+            writeFile file: 'base-vars.tfvars',     text: params.BASE_VARS_CONTENT
             withCredentials([
-                file(credentialsId: 'ocp-pull-secret',         variable: 'PULL_SECRET_SRC'),
                 file(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG')
             ]) {
                 sh '''
-                    cp "${PULL_SECRET_SRC}" data/pull-secret.txt
                     chmod 600 data/pull-secret.txt
 
                     echo "=== terraform init ==="
@@ -148,9 +150,6 @@ node('terraform') {
         stage('Terraform Plan Destroy') {
             dir('tf') {
                 wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
-                withCredentials([
-                    file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
-                ]) {
                     def clusterVars = [
                         "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
                         "-var 'user_name=${params.POWERVC_USERNAME}'",
@@ -179,12 +178,11 @@ node('terraform') {
                                 -no-color \\
                                 -input=false \\
                                 -destroy \\
-                                -var-file="\${TF_BASE_VARS_FILE}" \\
+                                -var-file="base-vars.tfvars" \\
                                 ${clusterVars.join(' \\\n                                ')} \\
                                 -out='${wsName}-destroy.tfplan'
                         """
                     }
-                } // end withCredentials
                 } // end wrap
             }
         }
@@ -223,7 +221,7 @@ node('terraform') {
     } // end lock
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt || true"
+    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars || true"
     echo "Cluster '${wsName}' destroyed successfully."
 
 } // end node

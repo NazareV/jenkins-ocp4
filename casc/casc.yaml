@@ -57,31 +57,6 @@ credentials:
     domainCredentials:
       - credentials:
 
-          # ── OCP pull secret ────────────────────────────────────────────────
-          # Written to tf/data/pull-secret.txt at runtime.
-          # The base var file keeps:  pull_secret_file = "data/pull-secret.txt"
-          # Encode: export OCP_PULL_SECRET_BASE64=$(base64 -w0 ~/pull-secret.txt)
-          - file:
-              scope: GLOBAL
-              id: "ocp-pull-secret"
-              fileName: "pull-secret.txt"
-              secretBytes: "${OCP_PULL_SECRET_BASE64}"
-              description: "OCP pull secret → written to data/pull-secret.txt at runtime"
-
-          # ── Base var file ──────────────────────────────────────────────────
-          # The populated var.tfvars with infrastructure-wide settings.
-          # Must NOT contain: user_name, password, rhel_subscription_*,
-          #                   cluster_id, cluster_id_prefix, tenant_name,
-          #                   cluster_domain, public_key_file, private_key_file.
-          # Those are injected via TF_VAR_* env vars or -var flags.
-          # Encode: export TF_BASE_VARS_B64=$(base64 -w0 base.tfvars)
-          - file:
-              scope: GLOBAL
-              id: "tf-base-vars"
-              fileName: "base.tfvars"
-              secretBytes: "${TF_BASE_VARS_B64}"
-              description: "Base var file (network, image UUIDs, instance types, OCP URLs…)"
-
           # ── Terraform backend config ───────────────────────────────────────
           # A .hcl file with the local backend path.
           # See jenkins-ocp4/backend/local-persistent.hcl.example

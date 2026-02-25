@@ -7,8 +7,8 @@
 //   2. Terraform repo (ocp4-upi-powervm) — checked out into tf/ subdir
 //
 // ── Variable split ─────────────────────────────────────────────────────────
-//   tf-base-vars credential  → -var-file  → network, OCP tarball URLs, features…
-//                                           (node sizing placeholders overridden below)
+//   BASE_VARS_CONTENT param  → -var-file  → network, OCP tarball URLs, features…
+//                                           (written to base-vars.tfvars at runtime)
 //   Job parameters (user)    → -var flags  → auth_url, user_name, password,
 //                                           openstack_availability_zone
 //   Job parameters (user)    → -var flags  → rhel_subscription_* (optional,
@@ -100,6 +100,18 @@ properties([
             defaultValue: '',
             description : 'Red Hat subscription password (required when RHEL_SUBSCRIPTION_ENABLED)'
         ),
+        // ── Base Terraform var file content (user-supplied per run) ──────────
+        text(
+            name        : 'BASE_VARS_CONTENT',
+            defaultValue: '',
+            description : 'Contents of base.tfvars — Terraform variables for network, OCP URLs, cluster domain, rhel_username, connection_timeout, and any optional settings. See var.tfvars in ocp4-upi-powervm for reference.'
+        ),
+        // ── OCP pull secret (user-specific) ───────────────────────────────
+        password(
+            name        : 'OCP_PULL_SECRET',
+            defaultValue: '',
+            description : 'OCP pull secret JSON from console.redhat.com/openshift/install/pull-secret. Required.'
+        ),
         // ── Node sizing (passed as Terraform object variables) ────────────────
         // instance_type : PowerVC compute template name
         // image_id      : PowerVC image UUID
@@ -171,6 +183,8 @@ node('terraform') {
         if (!params.OPENSTACK_AVAILABILITY_ZONE?.trim())  errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
         if (!params.POWERVC_USERNAME?.trim())             errors << '  • POWERVC_USERNAME is required'
         if (!params.POWERVC_PASSWORD?.trim())             errors << '  • POWERVC_PASSWORD is required'
+        if (!params.OCP_PULL_SECRET?.trim())              errors << '  • OCP_PULL_SECRET is required'
+        if (!params.BASE_VARS_CONTENT?.trim())            errors << '  • BASE_VARS_CONTENT is required'
         if (params.RHEL_SUBSCRIPTION_ENABLED) {
             if (!params.RHEL_SUB_USER?.trim()) errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
             if (!params.RHEL_SUB_PASS?.trim()) errors << '  • RHEL_SUB_PASS is required when RHEL_SUBSCRIPTION_ENABLED'
@@ -240,12 +254,12 @@ node('terraform') {
         // ── Terraform Init ────────────────────────────────────────────────────
         stage('Terraform Init') {
             dir('tf') {
+                writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET
+                writeFile file: 'base-vars.tfvars',     text: params.BASE_VARS_CONTENT
                 withCredentials([
-                    file(credentialsId: 'ocp-pull-secret',          variable: 'PULL_SECRET_SRC'),
-                    file(credentialsId: 'terraform-backend-config',  variable: 'TF_BACKEND_CFG')
+                    file(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG')
                 ]) {
                     sh '''
-                        cp "${PULL_SECRET_SRC}" data/pull-secret.txt
                         chmod 600 data/pull-secret.txt
 
                         echo "=== terraform init ==="
@@ -276,9 +290,6 @@ node('terraform') {
         stage('Terraform Plan') {
             dir('tf') {
                 wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
-                withCredentials([
-                    file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
-                ]) {
                     def clusterVars = [
                         "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
                         "-var 'user_name=${params.POWERVC_USERNAME}'",
@@ -313,12 +324,11 @@ node('terraform') {
                             terraform plan \\
                                 -no-color \\
                                 -input=false \\
-                                -var-file="\${TF_BASE_VARS_FILE}" \\
+                                -var-file="base-vars.tfvars" \\
                                 ${clusterVars.join(' \\\n                                ')} \\
                                 -out='${wsName}.tfplan'
                         """
                     }
-                } // end withCredentials
                 } // end wrap
             }
         }
@@ -375,6 +385,6 @@ node('terraform') {
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}.tfplan' tf/data/pull-secret.txt || true"
+    sh "rm -f tf/'${wsName}.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars || true"
 
 } // end node
