@@ -94,14 +94,12 @@ silently overrides the Jenkins-injected value (Terraform precedence: `-var-file`
 **Start from your `var.tfvars` and remove these keys entirely:**
 
 ```
-# Injected as TF_VAR_* env vars — file value would override them
-auth_url
-user_name
+# Injected as TF_VAR_* env vars — file value would OVERRIDE them — MUST remove
 password
 domain_name
-openstack_availability_zone
 
-# Injected as -var flags — safe to keep OR remove (your choice)
+# Injected as -var flags — safe to keep OR remove (your choice, -var always wins)
+# auth_url, user_name, openstack_availability_zone
 # tenant_name, cluster_id, cluster_id_prefix, public_key_file, private_key_file
 # rhel_subscription_username, rhel_subscription_password
 # bastion, bootstrap, master, worker
@@ -278,9 +276,9 @@ docker start jenkins-ocp4
 
 **Terraform precedence (lowest → highest):** `TF_VAR_*` env vars → `-var-file` → `-var` flags.
 
-This means variables injected as `TF_VAR_*` (auth_url, user_name, password, domain_name,
-openstack_availability_zone) **must not appear in `base.tfvars`** — the file would win over the env var.
-Variables injected as `-var` flags can safely remain in `base.tfvars` as defaults.
+Only `password` and `domain_name` are injected as `TF_VAR_*` env vars — these **must not appear
+in `base.tfvars`** because `-var-file` has higher precedence than env vars and would silently override them.
+All other variables are injected as `-var` flags (highest precedence) and can safely remain in `base.tfvars` as defaults.
 
 ---
 
