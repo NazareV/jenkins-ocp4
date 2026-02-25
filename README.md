@@ -55,8 +55,6 @@ Terraform runs inside the Jenkins container on the controller node. All provider
 |------|-------|
 | Docker | Running on the Jenkins host |
 | SSH key pair | `~/.ssh/id_rsa` + `~/.ssh/id_rsa.pub` on the Jenkins host |
-| OCP pull secret | JSON from console.redhat.com/openshift/install/pull-secret — pasted as a job parameter at build time |
-| `ocp4-upi-powervm` `var.tfvars` | Your populated copy of the Terraform var file — content pasted as `BASE_VARS_CONTENT` at build time |
 | Git PAT | Personal access token with `repo` read scope (or `unused` for public repos) |
 
 ---
