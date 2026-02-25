@@ -9,52 +9,6 @@
 def jenkinsRepoUrl    = System.getenv('JENKINS_REPO_URL')    ?: 'https://github.com/your-org/jenkins-ocp4.git'
 def jenkinsRepoBranch = System.getenv('JENKINS_REPO_BRANCH') ?: 'main'
 
-// ── Shared helpers ────────────────────────────────────────────────────────────
-
-def commonParameters = { ->
-    stringParam(
-        'TENANT_NAME', '',
-        'OpenStack/PowerVC project (tenant) name. First segment of the Terraform workspace: <TENANT_NAME>-<CLUSTER_ID_PREFIX>-<CLUSTER_ID>.'
-    )
-    stringParam(
-        'CLUSTER_ID_PREFIX', 'ocp',
-        'Short prefix for cluster role or environment (e.g. ocp, dev, prod). Max 6 chars.'
-    )
-    stringParam(
-        'CLUSTER_ID', '',
-        'Unique cluster identifier within the tenant+prefix namespace (e.g. cluster01). Max 8 chars.'
-    )
-    stringParam(
-        'CLUSTER_DOMAIN', '',
-        '(Optional) OCP base domain override, e.g. example.com. Leave blank to use the default from the base var file.'
-    )
-}
-
-def commonLogRotator = { ->
-    numToKeep(30)
-    artifactNumToKeep(10)
-}
-
-// SCM points to the JENKINS repo — this is where the Jenkinsfiles live.
-def jenkinsScm = { ->
-    cpsScm {
-        scm {
-            git {
-                remote {
-                    url(jenkinsRepoUrl)
-                    credentials('git-credentials')
-                }
-                branch(jenkinsRepoBranch)
-                extensions {
-                    cloneOption { shallow(false); depth(0); timeout(15) }
-                    cleanBeforeCheckout()
-                }
-            }
-        }
-        lightweight(false)
-    }
-}
-
 // ── cluster-create ────────────────────────────────────────────────────────────
 
 pipelineJob('cluster-create') {
@@ -68,11 +22,29 @@ pipelineJob('cluster-create') {
                     same-cluster operations are serialized by a Jenkins lock.
     '''.stripIndent())
 
-    logRotator commonLogRotator
+    logRotator {
+        numToKeep(30)
+        artifactNumToKeep(10)
+    }
 
     parameters {
-        commonParameters.delegate = delegate
-        commonParameters()
+        // ── Cluster identity ─────────────────────────────────────────────────
+        stringParam(
+            'TENANT_NAME', '',
+            'OpenStack/PowerVC project (tenant) name. First segment of the Terraform workspace: <TENANT_NAME>-<CLUSTER_ID_PREFIX>-<CLUSTER_ID>.'
+        )
+        stringParam(
+            'CLUSTER_ID_PREFIX', 'ocp',
+            'Short prefix for cluster role or environment (e.g. ocp, dev, prod). Max 6 chars.'
+        )
+        stringParam(
+            'CLUSTER_ID', '',
+            'Unique cluster identifier within the tenant+prefix namespace (e.g. cluster01). Max 8 chars.'
+        )
+        stringParam(
+            'CLUSTER_DOMAIN', '',
+            '(Optional) OCP base domain override, e.g. example.com. Leave blank to use the default from the base var file.'
+        )
         booleanParam(
             'AUTO_APPROVE', false,
             'Skip the manual approval gate before terraform apply.'
@@ -115,10 +87,23 @@ pipelineJob('cluster-create') {
     }
 
     definition {
-        def scm = jenkinsScm()
-        scm.delegate = delegate
-        scm()
-        delegate.scriptPath('pipelines/Jenkinsfile.create')
+        cpsScm {
+            scm {
+                git {
+                    remote {
+                        url(jenkinsRepoUrl)
+                        credentials('git-credentials')
+                    }
+                    branch(jenkinsRepoBranch)
+                    extensions {
+                        cloneOption { shallow(false); depth(0); timeout(15) }
+                        cleanBeforeCheckout()
+                    }
+                }
+            }
+            scriptPath('pipelines/Jenkinsfile.create')
+            lightweight(false)
+        }
     }
 }
 
@@ -133,11 +118,29 @@ pipelineJob('cluster-destroy') {
         /opt/terraform_states after a successful destroy.
     '''.stripIndent())
 
-    logRotator commonLogRotator
+    logRotator {
+        numToKeep(30)
+        artifactNumToKeep(10)
+    }
 
     parameters {
-        commonParameters.delegate = delegate
-        commonParameters()
+        // ── Cluster identity ─────────────────────────────────────────────────
+        stringParam(
+            'TENANT_NAME', '',
+            'OpenStack/PowerVC project (tenant) name. First segment of the Terraform workspace: <TENANT_NAME>-<CLUSTER_ID_PREFIX>-<CLUSTER_ID>.'
+        )
+        stringParam(
+            'CLUSTER_ID_PREFIX', 'ocp',
+            'Short prefix for cluster role or environment (e.g. ocp, dev, prod). Max 6 chars.'
+        )
+        stringParam(
+            'CLUSTER_ID', '',
+            'Unique cluster identifier within the tenant+prefix namespace (e.g. cluster01). Max 8 chars.'
+        )
+        stringParam(
+            'CLUSTER_DOMAIN', '',
+            '(Optional) OCP base domain override, e.g. example.com. Leave blank to use the default from the base var file.'
+        )
         booleanParam(
             'DELETE_WORKSPACE', true,
             'Delete the Terraform workspace from the state directory after successful destroy.'
@@ -167,9 +170,22 @@ pipelineJob('cluster-destroy') {
     }
 
     definition {
-        def scm = jenkinsScm()
-        scm.delegate = delegate
-        scm()
-        delegate.scriptPath('pipelines/Jenkinsfile.destroy')
+        cpsScm {
+            scm {
+                git {
+                    remote {
+                        url(jenkinsRepoUrl)
+                        credentials('git-credentials')
+                    }
+                    branch(jenkinsRepoBranch)
+                    extensions {
+                        cloneOption { shallow(false); depth(0); timeout(15) }
+                        cleanBeforeCheckout()
+                    }
+                }
+            }
+            scriptPath('pipelines/Jenkinsfile.destroy')
+            lightweight(false)
+        }
     }
 }

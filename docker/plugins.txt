@@ -8,6 +8,7 @@ configuration-as-code:latest
 
 # Job creation
 job-dsl:latest
+mask-passwords:latest
 
 # Credentials and secrets
 credentials-binding:latest
