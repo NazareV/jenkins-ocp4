@@ -21,7 +21,7 @@ jenkins-ocp4/
 ├── backend/
 │   └── local-persistent.hcl.example ← Local backend config for /opt/terraform_states
 ├── docker/
-│   ├── Dockerfile                   ← Jenkins 2.541.2-jdk21 + Terraform 1.7.5
+│   ├── Dockerfile                   ← Jenkins 2.541.2-jdk21 + Terraform (latest, built from source)
 │   └── plugins.txt                  ← Required plugins
 ├── jobs/
 │   └── seed.groovy                  ← Job DSL: creates cluster-create & cluster-destroy
@@ -213,14 +213,26 @@ docker logs -f jenkins-ocp4 2>&1 | grep "fully up"
 
 ### Terraform providers
 
-Both providers required by `ocp4-upi-powervm` are pre-downloaded into the image at build time and stored at `/opt/terraform-plugin-cache` (outside the volume mount so they are never overwritten). Every `terraform init` in the pipeline uses this cache without requiring internet access at runtime.
+All providers are downloaded at image build time from the
+[`ocp-power-automation/terraform-providers-power`](https://github.com/ocp-power-automation/terraform-providers-power/releases)
+archive (always the latest release). They are stored at `/opt/terraform-providers/` inside the image.
 
-| Provider | Version installed |
+Every `terraform init` in the pipeline uses `-plugin-dir /opt/terraform-providers/` — the Terraform
+registry is never contacted at runtime. No internet access is required on the Jenkins host.
+
+Providers currently included in the archive (all `linux/ppc64le`):
+
+| Provider | Notes |
 |---|---|
-| `terraform-provider-openstack/openstack` | `~> 1.32` |
-| `hashicorp/random` | `~> 3.4` |
+| `terraform-provider-openstack/openstack` | Required by `ocp4-upi-powervm` |
+| `hashicorp/random` | Required by `ocp4-upi-powervm` |
+| `hashicorp/null` | Bundled in archive |
+| `hashicorp/time` | Bundled in archive |
+| `IBM-Cloud/ibm` | Bundled in archive |
+| `community-terraform-providers/ignition` | Bundled in archive |
+| `terraform-providers/ignition` | Bundled in archive |
 
-If `versions.tf` in the Terraform repo changes its provider requirements, rebuild the image.
+If the upstream archive adds or removes providers, rebuild the image (`docker build --no-cache`).
 
 ### One-time post-start configuration (authorize-project)
 
@@ -252,10 +264,6 @@ Jenkins isolates concurrent builds of the same job into separate workspace dirs:
 
 Each has its own `tf/`, `tf/data/`, `tf/.terraform/`, and plan files.
 No shared mutable state on disk between concurrent builds.
-
-`TF_PLUGIN_CACHE_DIR=/var/jenkins_home/.terraform-plugin-cache` is a shared
-provider binary cache. Terraform uses OS file locking inside it — safe for
-concurrent access. Avoids re-downloading providers on every build.
 
 `numExecutors: 10` in `casc.yaml` — increase for higher concurrency.
 
