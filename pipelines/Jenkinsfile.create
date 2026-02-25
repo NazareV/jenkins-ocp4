@@ -280,7 +280,7 @@ node('terraform') {
                     "TF_VAR_auth_url=${params.POWERVC_AUTH_URL}",
                     "TF_VAR_user_name=${params.POWERVC_USERNAME}",
                     "TF_VAR_password=${params.POWERVC_PASSWORD}",
-                    "TF_VAR_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
+                    "TF_VAR_openstack_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
                 ]) {
                 withCredentials([
                     string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
@@ -346,7 +346,7 @@ node('terraform') {
                     "TF_VAR_auth_url=${params.POWERVC_AUTH_URL}",
                     "TF_VAR_user_name=${params.POWERVC_USERNAME}",
                     "TF_VAR_password=${params.POWERVC_PASSWORD}",
-                    "TF_VAR_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
+                    "TF_VAR_openstack_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
                 ]) {
                 withCredentials([
                     string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name')
