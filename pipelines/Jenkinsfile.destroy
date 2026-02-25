@@ -16,6 +16,7 @@ node('terraform') {
     def wsName          = ''
     def retryCnt        = 2
     def workspaceFound  = true   // set false when workspace doesn't exist → skip destroy
+    def clusterVars     = []     // populated in Plan Destroy, reused in Destroy retry
 
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
@@ -173,7 +174,7 @@ node('terraform') {
         stage('Terraform Plan Destroy') {
             dir('tf') {
                 wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
-                    def clusterVars = [
+                    clusterVars = [
                         "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
                         "-var 'user_name=${params.POWERVC_USERNAME}'",
                         "-var 'password=${params.POWERVC_PASSWORD}'",
@@ -211,19 +212,24 @@ node('terraform') {
         }
 
         // ── Terraform Destroy ─────────────────────────────────────────────────
-        // retry() re-attempts the destroy on transient failures (timeouts, API blips).
+        // Passes var-files and -var flags directly — no saved plan file.
+        // Each retry runs against current state, avoiding stale-plan errors.
         stage('Terraform Destroy') {
             dir('tf') {
-                withEnv(["TF_IN_AUTOMATION=true"]) {
-                    retry(retryCnt) {
-                        sh """
-                            echo "=== terraform apply (destroy plan, attempt) ==="
-                            terraform apply \\
-                                -no-color \\
-                                -input=false \\
-                                -auto-approve \\
-                                '${wsName}-destroy.tfplan'
-                        """
+                wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
+                    withEnv(["TF_IN_AUTOMATION=true"]) {
+                        retry(retryCnt) {
+                            sh """
+                                echo "=== terraform destroy (attempt) ==="
+                                terraform apply \\
+                                    -no-color \\
+                                    -input=false \\
+                                    -auto-approve \\
+                                    -destroy \\
+                                    -var-file="base-vars.tfvars" \\
+                                    ${clusterVars.join(' \\\n                                    ')}
+                            """
+                        }
                     }
                 }
             }

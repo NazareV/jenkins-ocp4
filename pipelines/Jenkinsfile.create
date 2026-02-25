@@ -397,8 +397,9 @@ node('terraform') {
         }
 
         // ── Terraform Apply ───────────────────────────────────────────────────
-        // Applies the saved plan file — no -var flags needed (values captured in plan).
-        // retry() re-attempts on transient failures (timeouts, API blips).
+        // Passes var-files and -var flags directly instead of a saved plan file.
+        // Each retry runs terraform apply against current state, so a partial
+        // apply from the previous attempt never causes a "stale plan" error.
         // On final failure, a destroy cleans up any partially-created resources.
         stage('Terraform Apply') {
             dir('tf') {
@@ -412,7 +413,9 @@ node('terraform') {
                                         -no-color \\
                                         -input=false \\
                                         -auto-approve \\
-                                        '${wsName}.tfplan'
+                                        -var-file="base-vars.tfvars" \\
+                                        -var-file="node-vars.tfvars" \\
+                                        ${clusterVars.join(' \\\n                                        ')}
                                 """
                             }
                         } catch (applyErr) {
