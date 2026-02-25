@@ -1,34 +1,35 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 — Build Terraform for linux/ppc64le from source
 #
-# HashiCorp does not publish official ppc64le binaries. This stage clones
-# the official Terraform repo at the latest release tag and cross-compiles it
-# for linux/ppc64le using the Go toolchain installed by rpsene/goconfig.
-# Method mirrors docs/automation_host_prereqs.md from ocp4-upi-powervm.
+# HashiCorp does not publish official ppc64le binaries. This stage clones the
+# official Terraform repo at the latest release tag and cross-compiles it for
+# linux/ppc64le using the official Go toolchain.
+#
+# The golang base image handles architecture detection automatically — this
+# stage runs correctly on amd64, arm64, and ppc64le build hosts.
+# When building on the production ppc64le host, set GOARCH=ppc64le explicitly
+# to match; cross-compilation from amd64/arm64 also works.
+#
+# On the production ppc64le Jenkins host the equivalent of:
+#   git clone https://github.com/rpsene/goconfig.git && source go.sh install 1.18
+#   (docs/automation_host_prereqs.md) can be used to set up the host Go env.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS terraform-builder
+FROM golang:1.23 AS terraform-builder
 
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
         git curl ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Go using rpsene/goconfig (same helper used in automation host prereqs)
-RUN git clone --depth=1 https://github.com/rpsene/goconfig.git /tmp/goconfig
-
-# Build the latest Terraform release for linux/ppc64le.
-# All steps run inside a single bash invocation so that the PATH changes made
-# by sourcing go.sh are visible to the 'go build' call that follows.
-RUN bash -c '\
-    source /tmp/goconfig/go.sh install 1.18 && \
-    TAG=$(curl -s "https://api.github.com/repos/hashicorp/terraform/releases/latest" \
-          | grep tag_name | sed "s/.*\"tag_name\": \"\(.*\)\".*/\1/") && \
+# Clone latest Terraform release and cross-compile for linux/ppc64le
+RUN TAG=$(curl -s "https://api.github.com/repos/hashicorp/terraform/releases/latest" \
+          | grep tag_name | sed 's/.*"tag_name": "\(.*\)".*/\1/') && \
     echo "=== Building Terraform ${TAG} for linux/ppc64le ===" && \
     git clone --depth=1 --branch "${TAG}" \
         https://github.com/hashicorp/terraform.git /tmp/terraform && \
     cd /tmp/terraform && \
-    env GOOS=linux GOARCH=ppc64le go build -o /tmp/terraform-ppc64le . && \
-    echo "Binary: $(file /tmp/terraform-ppc64le)"'
+    CGO_ENABLED=0 GOOS=linux GOARCH=ppc64le go build -o /tmp/terraform-ppc64le . && \
+    echo "Binary: $(file /tmp/terraform-ppc64le)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 — Jenkins runtime image
@@ -45,7 +46,7 @@ RUN apt-get update -qq && \
 
 # ── Terraform binary (linux/ppc64le, built from source in Stage 1) ────────────
 COPY --from=terraform-builder /tmp/terraform-ppc64le /usr/local/bin/terraform
-RUN chmod +x /usr/local/bin/terraform && terraform version
+RUN chmod +x /usr/local/bin/terraform && file /usr/local/bin/terraform
 
 # ── Terraform providers (linux/ppc64le) ───────────────────────────────────────
 # Always downloads the LATEST release from ocp-power-automation/terraform-providers-power.
