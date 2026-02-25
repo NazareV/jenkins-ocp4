@@ -176,17 +176,17 @@ node('terraform') {
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
         def errors = []
-        if (!params.TENANT_NAME?.trim())                  errors << '  • TENANT_NAME is required'
-        if (!params.CLUSTER_ID_PREFIX?.trim())            errors << '  • CLUSTER_ID_PREFIX is required'
-        if (!params.CLUSTER_ID?.trim())                   errors << '  • CLUSTER_ID is required'
-        if (!params.POWERVC_AUTH_URL?.trim())             errors << '  • POWERVC_AUTH_URL is required'
-        if (!params.OPENSTACK_AVAILABILITY_ZONE?.trim())  errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
-        if (!params.POWERVC_USERNAME?.trim())             errors << '  • POWERVC_USERNAME is required'
-        if (!params.POWERVC_PASSWORD?.toString()?.trim())  errors << '  • POWERVC_PASSWORD is required'
-        if (!params.OCP_PULL_SECRET?.toString()?.trim())   errors << '  • OCP_PULL_SECRET is required'
-        if (!params.BASE_VARS_CONTENT?.trim())             errors << '  • BASE_VARS_CONTENT is required'
+        if (!params.TENANT_NAME?.toString()?.trim())                 errors << '  • TENANT_NAME is required'
+        if (!params.CLUSTER_ID_PREFIX?.toString()?.trim())           errors << '  • CLUSTER_ID_PREFIX is required'
+        if (!params.CLUSTER_ID?.toString()?.trim())                  errors << '  • CLUSTER_ID is required'
+        if (!params.POWERVC_AUTH_URL?.toString()?.trim())            errors << '  • POWERVC_AUTH_URL is required'
+        if (!params.OPENSTACK_AVAILABILITY_ZONE?.toString()?.trim()) errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
+        if (!params.POWERVC_USERNAME?.toString()?.trim())            errors << '  • POWERVC_USERNAME is required'
+        if (!params.POWERVC_PASSWORD?.toString()?.trim())            errors << '  • POWERVC_PASSWORD is required'
+        if (!params.OCP_PULL_SECRET?.toString()?.trim())             errors << '  • OCP_PULL_SECRET is required'
+        if (!params.BASE_VARS_CONTENT?.trim())                       errors << '  • BASE_VARS_CONTENT is required'
         if (params.RHEL_SUBSCRIPTION_ENABLED) {
-            if (!params.RHEL_SUB_USER?.trim())              errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
+            if (!params.RHEL_SUB_USER?.toString()?.trim()) errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
             if (!params.RHEL_SUB_PASS?.toString()?.trim()) errors << '  • RHEL_SUB_PASS is required when RHEL_SUBSCRIPTION_ENABLED'
         }
         // instance_type and image_id required for bastion, bootstrap, master
@@ -195,23 +195,23 @@ node('terraform') {
             [prefix: 'BOOTSTRAP'],
             [prefix: 'MASTER'],
         ].each { node ->
-            if (!params["${node.prefix}_INSTANCE_TYPE"]?.trim())
+            if (!params["${node.prefix}_INSTANCE_TYPE"]?.toString()?.trim())
                 errors << "  • ${node.prefix}_INSTANCE_TYPE is required"
-            if (!params["${node.prefix}_IMAGE_ID"]?.trim())
+            if (!params["${node.prefix}_IMAGE_ID"]?.toString()?.trim())
                 errors << "  • ${node.prefix}_IMAGE_ID is required"
         }
         // MASTER_COUNT must be a positive integer
-        def masterCnt = params.MASTER_COUNT?.trim()
+        def masterCnt = params.MASTER_COUNT?.toString()?.trim()
         if (!masterCnt || !(masterCnt ==~ /^[1-9][0-9]*$/))
             errors << "  • MASTER_COUNT must be a positive integer (got: '${masterCnt}')"
         // WORKER_COUNT may be 0 (SNO) or a positive integer
-        def workerCnt = params.WORKER_COUNT?.trim()
+        def workerCnt = params.WORKER_COUNT?.toString()?.trim()
         if (!workerCnt || !(workerCnt ==~ /^[0-9]+$/))
             errors << "  • WORKER_COUNT must be 0 or a positive integer (got: '${workerCnt}')"
         // worker instance_type/image_id only required when worker count > 0
         if ((workerCnt?.isInteger() ? workerCnt.toInteger() : 1) > 0) {
-            if (!params.WORKER_INSTANCE_TYPE?.trim()) errors << '  • WORKER_INSTANCE_TYPE is required when WORKER_COUNT > 0'
-            if (!params.WORKER_IMAGE_ID?.trim())      errors << '  • WORKER_IMAGE_ID is required when WORKER_COUNT > 0'
+            if (!params.WORKER_INSTANCE_TYPE?.toString()?.trim()) errors << '  • WORKER_INSTANCE_TYPE is required when WORKER_COUNT > 0'
+            if (!params.WORKER_IMAGE_ID?.toString()?.trim())      errors << '  • WORKER_IMAGE_ID is required when WORKER_COUNT > 0'
         }
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 

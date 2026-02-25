@@ -18,15 +18,15 @@ node('terraform') {
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
         def errors = []
-        if (!params.TENANT_NAME?.trim())                  errors << '  • TENANT_NAME is required'
-        if (!params.CLUSTER_ID_PREFIX?.trim())            errors << '  • CLUSTER_ID_PREFIX is required'
-        if (!params.CLUSTER_ID?.trim())                   errors << '  • CLUSTER_ID is required'
-        if (!params.POWERVC_AUTH_URL?.trim())             errors << '  • POWERVC_AUTH_URL is required'
-        if (!params.OPENSTACK_AVAILABILITY_ZONE?.trim())  errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
-        if (!params.POWERVC_USERNAME?.trim())             errors << '  • POWERVC_USERNAME is required'
-        if (!params.POWERVC_PASSWORD?.toString()?.trim())  errors << '  • POWERVC_PASSWORD is required'
-        if (!params.OCP_PULL_SECRET?.toString()?.trim())  errors << '  • OCP_PULL_SECRET is required'
-        if (!params.BASE_VARS_CONTENT?.trim())            errors << '  • BASE_VARS_CONTENT is required'
+        if (!params.TENANT_NAME?.toString()?.trim())                 errors << '  • TENANT_NAME is required'
+        if (!params.CLUSTER_ID_PREFIX?.toString()?.trim())           errors << '  • CLUSTER_ID_PREFIX is required'
+        if (!params.CLUSTER_ID?.toString()?.trim())                  errors << '  • CLUSTER_ID is required'
+        if (!params.POWERVC_AUTH_URL?.toString()?.trim())            errors << '  • POWERVC_AUTH_URL is required'
+        if (!params.OPENSTACK_AVAILABILITY_ZONE?.toString()?.trim()) errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
+        if (!params.POWERVC_USERNAME?.toString()?.trim())            errors << '  • POWERVC_USERNAME is required'
+        if (!params.POWERVC_PASSWORD?.toString()?.trim())            errors << '  • POWERVC_PASSWORD is required'
+        if (!params.OCP_PULL_SECRET?.toString()?.trim())             errors << '  • OCP_PULL_SECRET is required'
+        if (!params.BASE_VARS_CONTENT?.trim())                       errors << '  • BASE_VARS_CONTENT is required'
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 
         wsName = "${params.TENANT_NAME}-${params.CLUSTER_ID_PREFIX}-${params.CLUSTER_ID}"
