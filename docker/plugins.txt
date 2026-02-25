@@ -24,6 +24,7 @@ lockable-resources:latest
 ansicolor:latest
 timestamper:latest
 build-timeout:latest
+rebuild:latest
 
 # Authorization
 matrix-auth:latest
