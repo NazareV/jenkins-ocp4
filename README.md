@@ -94,12 +94,9 @@ silently overrides the Jenkins-injected value (Terraform precedence: `-var-file`
 **Start from your `var.tfvars` and remove these keys entirely:**
 
 ```
-# Injected as TF_VAR_* env vars — file value would OVERRIDE them — MUST remove
-password
-domain_name
-
-# Injected as -var flags — safe to keep OR remove (your choice, -var always wins)
-# auth_url, user_name, openstack_availability_zone
+# All job-supplied values are injected as -var flags which always win over -var-file.
+# Nothing MUST be removed — but you may leave these out to keep the file clean:
+# auth_url, user_name, password, openstack_availability_zone
 # tenant_name, cluster_id, cluster_id_prefix, public_key_file, private_key_file
 # rhel_subscription_username, rhel_subscription_password
 # bastion, bootstrap, master, worker
@@ -174,8 +171,6 @@ JENKINS_REPO_BRANCH=main
 TF_REPO_URL=<git-url-of-ocp4-upi-powervm>
 TF_REPO_BRANCH=main
 
-POWERVC_DOMAIN_NAME=Default
-
 GIT_USERNAME=<your-git-username>
 GIT_TOKEN=<your-git-pat>
 
@@ -184,8 +179,8 @@ TF_BASE_VARS_B64=<value from step 4>
 TF_BACKEND_CONFIG_B64=<value from step 4>
 ```
 
-> `POWERVC_AUTH_URL`, `POWERVC_USERNAME`, `POWERVC_PASSWORD`, and `OPENSTACK_AVAILABILITY_ZONE`
-> are **not** set here — they are job parameters supplied by the user at trigger time.
+> `POWERVC_AUTH_URL`, `POWERVC_USERNAME`, `POWERVC_PASSWORD`, `OPENSTACK_AVAILABILITY_ZONE`,
+> and `POWERVC_DOMAIN_NAME` are **not** set here — they are job parameters or come from `base.tfvars`.
 
 ---
 
@@ -267,18 +262,15 @@ docker start jenkins-ocp4
 
 | Source | Mechanism | Terraform variables |
 |--------|-----------|---------------------|
-| Jenkins credential `powervc-domain-name` | `TF_VAR_domain_name` | `domain_name` |
-| Jenkins credential `tf-base-vars` | `-var-file` | `network_name`, OCP tarball URLs, `cluster_domain` (default), features… |
-| Job parameters | `TF_VAR_password` env var | `password` (kept as env var — value must not appear on command line) |
-| Job parameters | `-var` flags | `auth_url`, `user_name`, `openstack_availability_zone`, `tenant_name`, `cluster_id`, `cluster_id_prefix`, `cluster_domain` (override), node sizing |
+| Jenkins credential `tf-base-vars` | `-var-file` | `network_name`, `domain_name`, OCP tarball URLs, `cluster_domain` (default), features… |
+| Job parameters | `-var` flags | `auth_url`, `user_name`, `password`, `openstack_availability_zone`, `tenant_name`, `cluster_id`, `cluster_id_prefix`, `cluster_domain` (override), node sizing |
 | Job parameters | `-var` flags (optional) | `rhel_subscription_username`, `rhel_subscription_password` |
 | Host `~/.ssh/` | `-var` flags | `public_key_file`, `private_key_file` |
 
 **Terraform precedence (lowest → highest):** `TF_VAR_*` env vars → `-var-file` → `-var` flags.
 
-Only `password` and `domain_name` are injected as `TF_VAR_*` env vars — these **must not appear
-in `base.tfvars`** because `-var-file` has higher precedence than env vars and would silently override them.
-All other variables are injected as `-var` flags (highest precedence) and can safely remain in `base.tfvars` as defaults.
+All variables are injected as `-var` flags (highest precedence) and safely override any value in `base.tfvars`.
+No `TF_VAR_*` env vars are used. `password` is masked in logs via `MaskPasswordsBuildWrapper`.
 
 ---
 

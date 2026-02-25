@@ -57,15 +57,6 @@ credentials:
     domainCredentials:
       - credentials:
 
-          # ── PowerVC API ────────────────────────────────────────────────────
-          # auth_url, user_name, password, and availability_zone are now supplied
-          # by each user as job parameters. Only domain_name remains here.
-          - string:
-              scope: GLOBAL
-              id: "powervc-domain-name"
-              secret: "${POWERVC_DOMAIN_NAME}"
-              description: "OpenStack domain name (usually 'Default') → TF_VAR_domain_name"
-
           # ── OCP pull secret ────────────────────────────────────────────────
           # Written to tf/data/pull-secret.txt at runtime.
           # The base var file keeps:  pull_secret_file = "data/pull-secret.txt"

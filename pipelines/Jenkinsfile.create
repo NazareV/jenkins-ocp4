@@ -9,9 +9,7 @@
 // ── Variable split ─────────────────────────────────────────────────────────
 //   tf-base-vars credential  → -var-file  → network, OCP tarball URLs, features…
 //                                           (node sizing placeholders overridden below)
-//   Jenkins credentials      → TF_VAR_*   → domain_name
-//   Job parameters (user)    → TF_VAR_*   → password (kept as env var — not safe on cmdline)
-//   Job parameters (user)    → -var flags  → auth_url, user_name,
+//   Job parameters (user)    → -var flags  → auth_url, user_name, password,
 //                                           openstack_availability_zone
 //   Job parameters (user)    → -var flags  → rhel_subscription_* (optional,
 //                                           only injected when enabled)
@@ -277,17 +275,14 @@ node('terraform') {
         // ── Terraform Plan ────────────────────────────────────────────────────
         stage('Terraform Plan') {
             dir('tf') {
-                wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'TF_VAR_password']]]) {
-                withEnv([
-                    "TF_VAR_password=${params.POWERVC_PASSWORD}"
-                ]) {
+                wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
                 withCredentials([
-                    string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
                     file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
                 ]) {
                     def clusterVars = [
                         "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
                         "-var 'user_name=${params.POWERVC_USERNAME}'",
+                        "-var 'password=${params.POWERVC_PASSWORD}'",
                         "-var 'openstack_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}'",
                         "-var 'tenant_name=${params.TENANT_NAME}'",
                         "-var 'cluster_id=${params.CLUSTER_ID}'",
@@ -324,7 +319,6 @@ node('terraform') {
                         """
                     }
                 } // end withCredentials
-                } // end withEnv
                 } // end wrap
             }
         }
@@ -343,28 +337,19 @@ node('terraform') {
         }
 
         // ── Terraform Apply ───────────────────────────────────────────────────
+        // Applies the saved plan file — no -var flags needed (values captured in plan).
         stage('Terraform Apply') {
             dir('tf') {
-                wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'TF_VAR_password']]]) {
-                withEnv([
-                    "TF_VAR_password=${params.POWERVC_PASSWORD}"
-                ]) {
-                withCredentials([
-                    string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name')
-                ]) {
-                    withEnv(["TF_IN_AUTOMATION=true"]) {
-                        sh """
-                            echo "=== terraform apply ==="
-                            terraform apply \\
-                                -no-color \\
-                                -input=false \\
-                                -auto-approve \\
-                                '${wsName}.tfplan'
-                        """
-                    }
-                } // end withCredentials
-                } // end withEnv
-                } // end wrap
+                withEnv(["TF_IN_AUTOMATION=true"]) {
+                    sh """
+                        echo "=== terraform apply ==="
+                        terraform apply \\
+                            -no-color \\
+                            -input=false \\
+                            -auto-approve \\
+                            '${wsName}.tfplan'
+                    """
+                }
             }
         }
 
