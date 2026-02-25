@@ -13,7 +13,8 @@
 
 node('terraform') {
 
-    def wsName = ''
+    def wsName   = ''
+    def retryCnt = 2
 
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
@@ -27,7 +28,12 @@ node('terraform') {
         if (!params.POWERVC_PASSWORD?.toString()?.trim())            errors << '  • POWERVC_PASSWORD is required'
         if (!params.OCP_PULL_SECRET?.toString()?.trim())             errors << '  • OCP_PULL_SECRET is required'
         if (!params.BASE_VARS_CONTENT?.trim())                       errors << '  • BASE_VARS_CONTENT is required'
+        def retryCntRaw = params.RETRY_COUNT?.toString()?.trim()
+        if (!retryCntRaw || !(retryCntRaw ==~ /^[1-9][0-9]*$/))
+            errors << "  • RETRY_COUNT must be a positive integer (got: '${retryCntRaw}')"
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
+
+        retryCnt = retryCntRaw.toInteger()
 
         wsName = "${params.TENANT_NAME}-${params.CLUSTER_ID_PREFIX}-${params.CLUSTER_ID}"
         if (!(wsName ==~ /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,89}$/)) {
@@ -201,17 +207,20 @@ node('terraform') {
         }
 
         // ── Terraform Destroy ─────────────────────────────────────────────────
+        // retry() re-attempts the destroy on transient failures (timeouts, API blips).
         stage('Terraform Destroy') {
             dir('tf') {
                 withEnv(["TF_IN_AUTOMATION=true"]) {
-                    sh """
-                        echo "=== terraform apply (destroy plan) ==="
-                        terraform apply \\
-                            -no-color \\
-                            -input=false \\
-                            -auto-approve \\
-                            '${wsName}-destroy.tfplan'
-                    """
+                    retry(retryCnt) {
+                        sh """
+                            echo "=== terraform apply (destroy plan, attempt) ==="
+                            terraform apply \\
+                                -no-color \\
+                                -input=false \\
+                                -auto-approve \\
+                                '${wsName}-destroy.tfplan'
+                        """
+                    }
                 }
             }
         }

@@ -102,6 +102,8 @@ pipelineJob('cluster-create') {
         stringParam('WORKER_INSTANCE_TYPE',    '', 'PowerVC compute template for worker nodes. Optional when WORKER_COUNT=0 (SNO).')
         stringParam('WORKER_IMAGE_ID',         '', 'PowerVC image UUID for worker nodes (RHCOS image). Optional when WORKER_COUNT=0 (SNO).')
         stringParam('WORKER_COUNT',           '2', 'Number of worker (compute) nodes. Set to 0 for SNO.')
+        // ── Retry ─────────────────────────────────────────────────────────────
+        stringParam('RETRY_COUNT', '2', 'Total attempts for Terraform apply (1 = no retry, 2 = one retry, etc.).')
     }
 
     definition {
@@ -204,6 +206,8 @@ pipelineJob('cluster-destroy') {
             'RHEL_SUB_PASS',
             'Red Hat subscription password (required when RHEL_SUBSCRIPTION_ENABLED).'
         )
+        // ── Retry ─────────────────────────────────────────────────────────────
+        stringParam('RETRY_COUNT', '2', 'Total attempts for Terraform destroy (1 = no retry, 2 = one retry, etc.).')
     }
 
     definition {

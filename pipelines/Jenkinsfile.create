@@ -165,13 +165,19 @@ properties([
             name        : 'WORKER_COUNT',
             defaultValue: '2',
             description : 'Number of worker (compute) nodes'
+        ),
+        string(
+            name        : 'RETRY_COUNT',
+            defaultValue: '2',
+            description : 'Total attempts for Terraform apply (1 = no retry, 2 = one retry, etc.)'
         )
     ])
 ])
 
 node('terraform') {
 
-    def wsName = ''
+    def wsName    = ''
+    def retryCnt  = 2
 
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
@@ -213,8 +219,12 @@ node('terraform') {
             if (!params.WORKER_INSTANCE_TYPE?.toString()?.trim()) errors << '  • WORKER_INSTANCE_TYPE is required when WORKER_COUNT > 0'
             if (!params.WORKER_IMAGE_ID?.toString()?.trim())      errors << '  • WORKER_IMAGE_ID is required when WORKER_COUNT > 0'
         }
+        def retryCntRaw = params.RETRY_COUNT?.toString()?.trim()
+        if (!retryCntRaw || !(retryCntRaw ==~ /^[1-9][0-9]*$/))
+            errors << "  • RETRY_COUNT must be a positive integer (got: '${retryCntRaw}')"
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 
+        retryCnt = retryCntRaw.toInteger()
         wsName = "${params.TENANT_NAME}-${params.CLUSTER_ID_PREFIX}-${params.CLUSTER_ID}"
         if (!(wsName ==~ /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,89}$/)) {
             error("Workspace name '${wsName}' is invalid (alphanumeric/dash/underscore, ≤90 chars, start alphanumeric).")
@@ -387,17 +397,20 @@ node('terraform') {
 
         // ── Terraform Apply ───────────────────────────────────────────────────
         // Applies the saved plan file — no -var flags needed (values captured in plan).
+        // retry() re-attempts the apply on transient failures (timeouts, API blips).
         stage('Terraform Apply') {
             dir('tf') {
                 withEnv(["TF_IN_AUTOMATION=true"]) {
-                    sh """
-                        echo "=== terraform apply ==="
-                        terraform apply \\
-                            -no-color \\
-                            -input=false \\
-                            -auto-approve \\
-                            '${wsName}.tfplan'
-                    """
+                    retry(retryCnt) {
+                        sh """
+                            echo "=== terraform apply (attempt) ==="
+                            terraform apply \\
+                                -no-color \\
+                                -input=false \\
+                                -auto-approve \\
+                                '${wsName}.tfplan'
+                        """
+                    }
                 }
             }
         }
