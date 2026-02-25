@@ -189,23 +189,29 @@ node('terraform') {
             if (!params.RHEL_SUB_USER?.trim()) errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
             if (!params.RHEL_SUB_PASS?.trim()) errors << '  • RHEL_SUB_PASS is required when RHEL_SUBSCRIPTION_ENABLED'
         }
-        // instance_type and image_id required for all 4 node types
+        // instance_type and image_id required for bastion, bootstrap, master
         [
             [prefix: 'BASTION'],
             [prefix: 'BOOTSTRAP'],
             [prefix: 'MASTER'],
-            [prefix: 'WORKER'],
         ].each { node ->
             if (!params["${node.prefix}_INSTANCE_TYPE"]?.trim())
                 errors << "  • ${node.prefix}_INSTANCE_TYPE is required"
             if (!params["${node.prefix}_IMAGE_ID"]?.trim())
                 errors << "  • ${node.prefix}_IMAGE_ID is required"
         }
-        // count only applies to scalable node types (master, worker)
-        ['MASTER', 'WORKER'].each { prefix ->
-            def cnt = params["${prefix}_COUNT"]?.trim()
-            if (!cnt || !(cnt ==~ /^[1-9][0-9]*$/))
-                errors << "  • ${prefix}_COUNT must be a positive integer (got: '${cnt}')"
+        // MASTER_COUNT must be a positive integer
+        def masterCnt = params.MASTER_COUNT?.trim()
+        if (!masterCnt || !(masterCnt ==~ /^[1-9][0-9]*$/))
+            errors << "  • MASTER_COUNT must be a positive integer (got: '${masterCnt}')"
+        // WORKER_COUNT may be 0 (SNO) or a positive integer
+        def workerCnt = params.WORKER_COUNT?.trim()
+        if (!workerCnt || !(workerCnt ==~ /^[0-9]+$/))
+            errors << "  • WORKER_COUNT must be 0 or a positive integer (got: '${workerCnt}')"
+        // worker instance_type/image_id only required when worker count > 0
+        if ((workerCnt?.isInteger() ? workerCnt.toInteger() : 1) > 0) {
+            if (!params.WORKER_INSTANCE_TYPE?.trim()) errors << '  • WORKER_INSTANCE_TYPE is required when WORKER_COUNT > 0'
+            if (!params.WORKER_IMAGE_ID?.trim())      errors << '  • WORKER_IMAGE_ID is required when WORKER_COUNT > 0'
         }
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 

@@ -99,9 +99,9 @@ pipelineJob('cluster-create') {
         stringParam('MASTER_INSTANCE_TYPE',    '', 'PowerVC compute template for master nodes.')
         stringParam('MASTER_IMAGE_ID',         '', 'PowerVC image UUID for master nodes (RHCOS image).')
         stringParam('MASTER_COUNT',           '3', 'Number of master (control-plane) nodes.')
-        stringParam('WORKER_INSTANCE_TYPE',    '', 'PowerVC compute template for worker nodes.')
-        stringParam('WORKER_IMAGE_ID',         '', 'PowerVC image UUID for worker nodes (RHCOS image).')
-        stringParam('WORKER_COUNT',           '2', 'Number of worker (compute) nodes.')
+        stringParam('WORKER_INSTANCE_TYPE',    '', 'PowerVC compute template for worker nodes. Optional when WORKER_COUNT=0 (SNO).')
+        stringParam('WORKER_IMAGE_ID',         '', 'PowerVC image UUID for worker nodes (RHCOS image). Optional when WORKER_COUNT=0 (SNO).')
+        stringParam('WORKER_COUNT',           '2', 'Number of worker (compute) nodes. Set to 0 for SNO.')
     }
 
     definition {
