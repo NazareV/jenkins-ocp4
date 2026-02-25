@@ -176,8 +176,9 @@ properties([
 
 node('terraform') {
 
-    def wsName    = ''
-    def retryCnt  = 2
+    def wsName      = ''
+    def retryCnt    = 2
+    def clusterVars = []   // populated in Plan, reused in cleanup destroy
 
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
@@ -343,7 +344,7 @@ node('terraform') {
         stage('Terraform Plan') {
             dir('tf') {
                 wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
-                    def clusterVars = [
+                    clusterVars = [
                         "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
                         "-var 'user_name=${params.POWERVC_USERNAME}'",
                         "-var 'password=${params.POWERVC_PASSWORD}'",
@@ -397,19 +398,43 @@ node('terraform') {
 
         // ── Terraform Apply ───────────────────────────────────────────────────
         // Applies the saved plan file — no -var flags needed (values captured in plan).
-        // retry() re-attempts the apply on transient failures (timeouts, API blips).
+        // retry() re-attempts on transient failures (timeouts, API blips).
+        // On final failure, a destroy cleans up any partially-created resources.
         stage('Terraform Apply') {
             dir('tf') {
-                withEnv(["TF_IN_AUTOMATION=true"]) {
-                    retry(retryCnt) {
-                        sh """
-                            echo "=== terraform apply (attempt) ==="
-                            terraform apply \\
-                                -no-color \\
-                                -input=false \\
-                                -auto-approve \\
-                                '${wsName}.tfplan'
-                        """
+                wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
+                    withEnv(["TF_IN_AUTOMATION=true"]) {
+                        try {
+                            retry(retryCnt) {
+                                sh """
+                                    echo "=== terraform apply (attempt) ==="
+                                    terraform apply \\
+                                        -no-color \\
+                                        -input=false \\
+                                        -auto-approve \\
+                                        '${wsName}.tfplan'
+                                """
+                            }
+                        } catch (applyErr) {
+                            try {
+                                stage('Cleanup on Failure') {
+                                    echo "Apply failed after ${retryCnt} attempt(s) — destroying partially-created resources..."
+                                    sh """
+                                        echo "=== terraform destroy (cleanup) ==="
+                                        terraform destroy \\
+                                            -no-color \\
+                                            -input=false \\
+                                            -auto-approve \\
+                                            -var-file="base-vars.tfvars" \\
+                                            -var-file="node-vars.tfvars" \\
+                                            ${clusterVars.join(' \\\n                                            ')}
+                                    """
+                                }
+                            } catch (destroyErr) {
+                                echo "WARNING: cleanup destroy also failed — manual cleanup may be required.\n${destroyErr.getMessage()}"
+                            }
+                            throw applyErr
+                        }
                     }
                 }
             }
