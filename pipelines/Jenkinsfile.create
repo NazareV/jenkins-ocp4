@@ -284,7 +284,7 @@ node('terraform') {
         // ── Terraform Init ────────────────────────────────────────────────────
         stage('Terraform Init') {
             dir('tf') {
-                writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET
+                writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET.toString()
                 writeFile file: 'base-vars.tfvars',     text: params.BASE_VARS_CONTENT
                 // Node-sizing vars written as a tfvars file so Terraform uses its
                 // full HCL parser — avoids type-coercion issues with -var flags.

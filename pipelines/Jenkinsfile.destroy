@@ -90,7 +90,7 @@ node('terraform') {
     // Run BEFORE the confirmation gate so backend/config errors surface early.
     stage('Terraform Init') {
         dir('tf') {
-            writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET
+            writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET.toString()
             writeFile file: 'base-vars.tfvars',     text: params.BASE_VARS_CONTENT
             withCredentials([
                 file(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG')
