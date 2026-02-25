@@ -13,8 +13,9 @@
 
 node('terraform') {
 
-    def wsName   = ''
-    def retryCnt = 2
+    def wsName          = ''
+    def retryCnt        = 2
+    def workspaceFound  = true   // set false when workspace doesn't exist → skip destroy
 
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
@@ -110,24 +111,27 @@ node('terraform') {
     }
 
     // ── Verify Workspace Exists ───────────────────────────────────────────────
-    // Prevents a silent no-op destroy against an empty new workspace.
+    // If the workspace is absent (e.g. cluster-create failed before Workspace
+    // Setup), the desired end-state is already achieved — skip destroy and
+    // finish with a warning rather than failing the build.
     stage('Verify Workspace Exists') {
         dir('tf') {
-            def exists = sh(
+            workspaceFound = sh(
                 script       : "terraform workspace list -no-color | grep -Eq '\\b${wsName}\\b'",
                 returnStatus : true
             ) == 0
 
-            if (!exists) {
-                error("""\
-                    |Workspace '${wsName}' not found in the state backend.
-                    |Verify: TENANT_NAME='${params.TENANT_NAME}', CLUSTER_ID_PREFIX='${params.CLUSTER_ID_PREFIX}', CLUSTER_ID='${params.CLUSTER_ID}'
-                    |Run `terraform workspace list` on the agent to see all known workspaces.
-                    |""".stripMargin())
+            if (!workspaceFound) {
+                echo "WARNING: Workspace '${wsName}' not found in the state backend — nothing to destroy."
+                echo "  Check: TENANT_NAME='${params.TENANT_NAME}', CLUSTER_ID_PREFIX='${params.CLUSTER_ID_PREFIX}', CLUSTER_ID='${params.CLUSTER_ID}'"
+                echo "  Run 'terraform workspace list' on the agent to see all known workspaces."
+            } else {
+                echo "Workspace '${wsName}' confirmed in backend."
             }
-            echo "Workspace '${wsName}' confirmed in backend."
         }
     }
+
+    if (workspaceFound) {
 
     // ── Confirmation Gate ─────────────────────────────────────────────────────
     // Operator must TYPE the exact workspace name — clicking OK is not enough.
@@ -245,5 +249,10 @@ node('terraform') {
     // ── Cleanup ───────────────────────────────────────────────────────────────
     sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
     echo "Cluster '${wsName}' destroyed successfully."
+
+    } else {
+        echo "Workspace '${wsName}' was not found in the state backend — no resources to destroy. Build marked as no-op."
+        currentBuild.result = 'NOT_BUILT'
+    } // end if (workspaceFound)
 
 } // end node
