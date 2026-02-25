@@ -34,8 +34,8 @@ pipelineJob('cluster-create') {
             'OpenStack/PowerVC project (tenant) name. First segment of the Terraform workspace: <TENANT_NAME>-<CLUSTER_ID_PREFIX>-<CLUSTER_ID>.'
         )
         stringParam(
-            'CLUSTER_ID_PREFIX', 'ocp',
-            'Short prefix for cluster role or environment (e.g. ocp, dev, prod). Max 6 chars.'
+            'CLUSTER_ID_PREFIX', '',
+            'Your initials + cluster type, e.g. Vaibhav Nazare doing an SNO cluster → "vn-sno"; regular cluster → "vn-reg". Max 6 chars.'
         )
         stringParam(
             'CLUSTER_ID', '',
@@ -48,6 +48,15 @@ pipelineJob('cluster-create') {
         booleanParam(
             'AUTO_APPROVE', false,
             'Skip the manual approval gate before terraform apply.'
+        )
+        // ── PowerVC connection ───────────────────────────────────────────────
+        stringParam(
+            'POWERVC_AUTH_URL', '',
+            'PowerVC / OpenStack Keystone auth endpoint, e.g. https://powervc.example.com:5000/v3/. Required.'
+        )
+        stringParam(
+            'OPENSTACK_AVAILABILITY_ZONE', '',
+            'OpenStack availability zone for all provisioned nodes, e.g. "Default". Required.'
         )
         // ── PowerVC credentials ──────────────────────────────────────────────
         stringParam(
@@ -72,12 +81,11 @@ pipelineJob('cluster-create') {
             'Red Hat subscription password (required when RHEL_SUBSCRIPTION_ENABLED).'
         )
         // ── Node sizing ───────────────────────────────────────────────────────
+        // Bastion and bootstrap counts are always 1; only instance type and image need user input.
         stringParam('BASTION_INSTANCE_TYPE',   '', 'PowerVC compute template for the bastion node.')
         stringParam('BASTION_IMAGE_ID',        '', 'PowerVC image UUID for the bastion node (RHEL image).')
-        stringParam('BASTION_COUNT',          '1', 'Number of bastion nodes.')
         stringParam('BOOTSTRAP_INSTANCE_TYPE', '', 'PowerVC compute template for the bootstrap node.')
         stringParam('BOOTSTRAP_IMAGE_ID',      '', 'PowerVC image UUID for the bootstrap node (RHCOS image).')
-        stringParam('BOOTSTRAP_COUNT',        '1', 'Number of bootstrap nodes (always 1 for OCP UPI).')
         stringParam('MASTER_INSTANCE_TYPE',    '', 'PowerVC compute template for master nodes.')
         stringParam('MASTER_IMAGE_ID',         '', 'PowerVC image UUID for master nodes (RHCOS image).')
         stringParam('MASTER_COUNT',           '3', 'Number of master (control-plane) nodes.')
@@ -130,8 +138,8 @@ pipelineJob('cluster-destroy') {
             'OpenStack/PowerVC project (tenant) name. First segment of the Terraform workspace: <TENANT_NAME>-<CLUSTER_ID_PREFIX>-<CLUSTER_ID>.'
         )
         stringParam(
-            'CLUSTER_ID_PREFIX', 'ocp',
-            'Short prefix for cluster role or environment (e.g. ocp, dev, prod). Max 6 chars.'
+            'CLUSTER_ID_PREFIX', '',
+            'Your initials + cluster type, e.g. Vaibhav Nazare doing an SNO cluster → "vn-sno"; regular cluster → "vn-reg". Max 6 chars.'
         )
         stringParam(
             'CLUSTER_ID', '',
@@ -144,6 +152,15 @@ pipelineJob('cluster-destroy') {
         booleanParam(
             'DELETE_WORKSPACE', true,
             'Delete the Terraform workspace from the state directory after successful destroy.'
+        )
+        // ── PowerVC connection ───────────────────────────────────────────────
+        stringParam(
+            'POWERVC_AUTH_URL', '',
+            'PowerVC / OpenStack Keystone auth endpoint, e.g. https://powervc.example.com:5000/v3/. Required.'
+        )
+        stringParam(
+            'OPENSTACK_AVAILABILITY_ZONE', '',
+            'OpenStack availability zone for all provisioned nodes, e.g. "Default". Required.'
         )
         // ── PowerVC credentials ──────────────────────────────────────────────
         stringParam(

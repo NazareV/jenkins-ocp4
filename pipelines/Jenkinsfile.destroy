@@ -18,9 +18,13 @@ node('terraform') {
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
         def errors = []
-        if (!params.TENANT_NAME?.trim())       errors << '  • TENANT_NAME is required'
-        if (!params.CLUSTER_ID_PREFIX?.trim()) errors << '  • CLUSTER_ID_PREFIX is required'
-        if (!params.CLUSTER_ID?.trim())        errors << '  • CLUSTER_ID is required'
+        if (!params.TENANT_NAME?.trim())                  errors << '  • TENANT_NAME is required'
+        if (!params.CLUSTER_ID_PREFIX?.trim())            errors << '  • CLUSTER_ID_PREFIX is required'
+        if (!params.CLUSTER_ID?.trim())                   errors << '  • CLUSTER_ID is required'
+        if (!params.POWERVC_AUTH_URL?.trim())             errors << '  • POWERVC_AUTH_URL is required'
+        if (!params.OPENSTACK_AVAILABILITY_ZONE?.trim())  errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
+        if (!params.POWERVC_USERNAME?.trim())             errors << '  • POWERVC_USERNAME is required'
+        if (!params.POWERVC_PASSWORD?.trim())             errors << '  • POWERVC_PASSWORD is required'
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 
         wsName = "${params.TENANT_NAME}-${params.CLUSTER_ID_PREFIX}-${params.CLUSTER_ID}"
@@ -140,8 +144,13 @@ node('terraform') {
         // ── Terraform Plan Destroy ────────────────────────────────────────────
         stage('Terraform Plan Destroy') {
             dir('tf') {
+                withEnv([
+                    "TF_VAR_auth_url=${params.POWERVC_AUTH_URL}",
+                    "TF_VAR_user_name=${params.POWERVC_USERNAME}",
+                    "TF_VAR_password=${params.POWERVC_PASSWORD}",
+                    "TF_VAR_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
+                ]) {
                 withCredentials([
-                    string(credentialsId: 'powervc-auth-url',    variable: 'TF_VAR_auth_url'),
                     string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
                     file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
                 ]) {
@@ -162,11 +171,7 @@ node('terraform') {
                         ]
                     }
 
-                    withEnv([
-                        "TF_VAR_user_name=${params.POWERVC_USERNAME}",
-                        "TF_VAR_password=${params.POWERVC_PASSWORD}",
-                        "TF_IN_AUTOMATION=true"
-                    ]) {
+                    withEnv(["TF_IN_AUTOMATION=true"]) {
                         sh """
                             echo "=== terraform plan -destroy ==="
                             terraform plan \\
@@ -178,7 +183,8 @@ node('terraform') {
                                 -out='${wsName}-destroy.tfplan'
                         """
                     }
-                }
+                } // end withCredentials
+                } // end withEnv
             }
         }
 

@@ -9,9 +9,9 @@
 // ── Variable split ─────────────────────────────────────────────────────────
 //   tf-base-vars credential  → -var-file  → network, OCP tarball URLs, features…
 //                                           (node sizing placeholders overridden below)
-//   Jenkins credentials      → TF_VAR_*   → auth_url, domain_name
-//   Job parameters (user)    → TF_VAR_*   → user_name (POWERVC_USERNAME),
-//                                           password  (POWERVC_PASSWORD)
+//   Jenkins credentials      → TF_VAR_*   → domain_name
+//   Job parameters (user)    → TF_VAR_*   → auth_url, user_name, password,
+//                                           availability_zone
 //   Job parameters (user)    → -var flags  → rhel_subscription_* (optional,
 //                                           only injected when enabled)
 //   Job parameters           → -var flags  → tenant_name, cluster_id,
@@ -46,7 +46,7 @@ properties([
         string(
             name        : 'CLUSTER_ID_PREFIX',
             defaultValue: '',
-            description : 'Short prefix for the cluster ID (e.g. dev)'
+            description : 'Your initials + cluster type, e.g. Vaibhav Nazare → "vn-sno" (SNO) or "vn-reg" (regular). Max 6 chars.'
         ),
         string(
             name        : 'CLUSTER_ID',
@@ -62,6 +62,17 @@ properties([
             name        : 'AUTO_APPROVE',
             defaultValue: false,
             description : 'Skip the manual approval gate'
+        ),
+        // ── PowerVC connection ────────────────────────────────────────────────
+        string(
+            name        : 'POWERVC_AUTH_URL',
+            defaultValue: '',
+            description : 'PowerVC / OpenStack Keystone auth URL, e.g. https://powervc.example.com:5000/v3/. Required.'
+        ),
+        string(
+            name        : 'OPENSTACK_AVAILABILITY_ZONE',
+            defaultValue: '',
+            description : 'OpenStack availability zone for all provisioned nodes, e.g. "Default". Required.'
         ),
         // ── PowerVC credentials (per user) ────────────────────────────────────
         string(
@@ -93,7 +104,7 @@ properties([
         // ── Node sizing (passed as Terraform object variables) ────────────────
         // instance_type : PowerVC compute template name
         // image_id      : PowerVC image UUID
-        // count         : number of VMs to create
+        // bastion and bootstrap counts are always 1 (fixed).
         string(
             name        : 'BASTION_INSTANCE_TYPE',
             defaultValue: '',
@@ -105,11 +116,6 @@ properties([
             description : 'PowerVC image UUID for the bastion node (RHEL image)'
         ),
         string(
-            name        : 'BASTION_COUNT',
-            defaultValue: '1',
-            description : 'Number of bastion nodes'
-        ),
-        string(
             name        : 'BOOTSTRAP_INSTANCE_TYPE',
             defaultValue: '',
             description : 'PowerVC compute template for the bootstrap node'
@@ -118,11 +124,6 @@ properties([
             name        : 'BOOTSTRAP_IMAGE_ID',
             defaultValue: '',
             description : 'PowerVC image UUID for the bootstrap node (RHCOS image)'
-        ),
-        string(
-            name        : 'BOOTSTRAP_COUNT',
-            defaultValue: '1',
-            description : 'Number of bootstrap nodes (always 1 for OCP UPI)'
         ),
         string(
             name        : 'MASTER_INSTANCE_TYPE',
@@ -164,29 +165,34 @@ node('terraform') {
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
         def errors = []
-        if (!params.TENANT_NAME?.trim())       errors << '  • TENANT_NAME is required'
-        if (!params.CLUSTER_ID_PREFIX?.trim()) errors << '  • CLUSTER_ID_PREFIX is required'
-        if (!params.CLUSTER_ID?.trim())        errors << '  • CLUSTER_ID is required'
-        if (!params.POWERVC_USERNAME?.trim())  errors << '  • POWERVC_USERNAME is required'
-        if (!params.POWERVC_PASSWORD?.trim())  errors << '  • POWERVC_PASSWORD is required'
+        if (!params.TENANT_NAME?.trim())                  errors << '  • TENANT_NAME is required'
+        if (!params.CLUSTER_ID_PREFIX?.trim())            errors << '  • CLUSTER_ID_PREFIX is required'
+        if (!params.CLUSTER_ID?.trim())                   errors << '  • CLUSTER_ID is required'
+        if (!params.POWERVC_AUTH_URL?.trim())             errors << '  • POWERVC_AUTH_URL is required'
+        if (!params.OPENSTACK_AVAILABILITY_ZONE?.trim())  errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
+        if (!params.POWERVC_USERNAME?.trim())             errors << '  • POWERVC_USERNAME is required'
+        if (!params.POWERVC_PASSWORD?.trim())             errors << '  • POWERVC_PASSWORD is required'
         if (params.RHEL_SUBSCRIPTION_ENABLED) {
             if (!params.RHEL_SUB_USER?.trim()) errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
             if (!params.RHEL_SUB_PASS?.trim()) errors << '  • RHEL_SUB_PASS is required when RHEL_SUBSCRIPTION_ENABLED'
         }
-        // Node sizing
+        // instance_type and image_id required for all 4 node types
         [
-            [prefix: 'BASTION',    label: 'bastion'],
-            [prefix: 'BOOTSTRAP',  label: 'bootstrap'],
-            [prefix: 'MASTER',     label: 'master'],
-            [prefix: 'WORKER',     label: 'worker'],
+            [prefix: 'BASTION'],
+            [prefix: 'BOOTSTRAP'],
+            [prefix: 'MASTER'],
+            [prefix: 'WORKER'],
         ].each { node ->
             if (!params["${node.prefix}_INSTANCE_TYPE"]?.trim())
                 errors << "  • ${node.prefix}_INSTANCE_TYPE is required"
             if (!params["${node.prefix}_IMAGE_ID"]?.trim())
                 errors << "  • ${node.prefix}_IMAGE_ID is required"
-            def cnt = params["${node.prefix}_COUNT"]?.trim()
+        }
+        // count only applies to scalable node types (master, worker)
+        ['MASTER', 'WORKER'].each { prefix ->
+            def cnt = params["${prefix}_COUNT"]?.trim()
             if (!cnt || !(cnt ==~ /^[1-9][0-9]*$/))
-                errors << "  • ${node.prefix}_COUNT must be a positive integer (got: '${cnt}')"
+                errors << "  • ${prefix}_COUNT must be a positive integer (got: '${cnt}')"
         }
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 
@@ -204,17 +210,11 @@ node('terraform') {
     }
 
     // ── Checkout Jenkins repo ─────────────────────────────────────────────────
-    // SCM checkout happens automatically for the Jenkinsfile itself; calling
-    // checkout scm here ensures the workspace is clean and up-to-date.
     stage('Checkout') {
         checkout scm
 
-        // Ensure the shared provider cache dir exists on first run.
         sh 'mkdir -p "${TF_PLUGIN_CACHE_DIR}"'
 
-        // Checkout the Terraform repo into the tf/ subdirectory.
-        // CleanBeforeCheckout removes any leftover files from previous builds
-        // (including the dynamically generated backend.tf).
         dir('tf') {
             checkout([
                 $class           : 'GitSCM',
@@ -223,10 +223,6 @@ node('terraform') {
                 extensions       : [[$class: 'CleanBeforeCheckout']]
             ])
 
-            // ── Inject backend.tf ─────────────────────────────────────────────
-            // This file is NOT committed to the terraform repo; it is generated
-            // here in the Jenkins workspace on every build.
-            // The actual path is supplied via -backend-config at terraform init.
             writeFile file: 'backend.tf', text: '''\
                 # Generated by Jenkins pipeline — do not commit to the terraform repo.
                 terraform {
@@ -239,9 +235,6 @@ node('terraform') {
     }
 
     // ── Per-cluster lock ───────────────────────────────────────────────────────
-    // Spans Init → Plan → (Approval) → Apply atomically.
-    // Builds for DIFFERENT clusters run in parallel (different resource names).
-    // A second build for the SAME cluster queues here, preventing stale plans.
     lock(resource: "tf-workspace-${wsName}", inversePrecedence: false) {
 
         // ── Terraform Init ────────────────────────────────────────────────────
@@ -252,8 +245,6 @@ node('terraform') {
                     file(credentialsId: 'terraform-backend-config',  variable: 'TF_BACKEND_CFG')
                 ]) {
                     sh '''
-                        # Pull secret written to path expected by the base var file:
-                        #   pull_secret_file = "data/pull-secret.txt"
                         cp "${PULL_SECRET_SRC}" data/pull-secret.txt
                         chmod 600 data/pull-secret.txt
 
@@ -283,22 +274,16 @@ node('terraform') {
         // ── Terraform Plan ────────────────────────────────────────────────────
         stage('Terraform Plan') {
             dir('tf') {
-                // PowerVC and RHEL creds come from job parameters (user-supplied).
-                // Other env-level secrets (auth URL, domain, var file) stay in
-                // the Jenkins credential store.
                 withEnv([
+                    "TF_VAR_auth_url=${params.POWERVC_AUTH_URL}",
                     "TF_VAR_user_name=${params.POWERVC_USERNAME}",
-                    "TF_VAR_password=${params.POWERVC_PASSWORD}"
+                    "TF_VAR_password=${params.POWERVC_PASSWORD}",
+                    "TF_VAR_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
                 ]) {
                 withCredentials([
-                    string(credentialsId: 'powervc-auth-url',    variable: 'TF_VAR_auth_url'),
                     string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
                     file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
                 ]) {
-                    // ── Build the -var flag list ───────────────────────────────
-                    // Per-cluster identity vars override anything in the var file.
-                    // SSH key paths point to the host's ~/.ssh/ (mounted into the
-                    // container at /var/jenkins_home/.ssh/).
                     def clusterVars = [
                         "-var 'tenant_name=${params.TENANT_NAME}'",
                         "-var 'cluster_id=${params.CLUSTER_ID}'",
@@ -309,21 +294,16 @@ node('terraform') {
                     if (params.CLUSTER_DOMAIN?.trim()) {
                         clusterVars << "-var 'cluster_domain=${params.CLUSTER_DOMAIN}'"
                     }
-                    // RHEL subscription: inject only when enabled and creds are provided.
-                    // Skipped when disabled — Terraform uses empty defaults from the base
-                    // var file.
                     if (params.RHEL_SUBSCRIPTION_ENABLED && params.RHEL_SUB_USER?.trim()) {
                         clusterVars += [
                             "-var 'rhel_subscription_username=${params.RHEL_SUB_USER}'",
                             "-var 'rhel_subscription_password=${params.RHEL_SUB_PASS}'"
                         ]
                     }
-                    // Node sizing: passed as Terraform object variables so they override
-                    // the placeholder values in the base var file.
-                    // count is an integer — no quotes; instance_type and image_id are strings.
+                    // bastion and bootstrap counts are always 1
                     clusterVars += [
-                        "-var 'bastion={instance_type=\"${params.BASTION_INSTANCE_TYPE}\",image_id=\"${params.BASTION_IMAGE_ID}\",count=${params.BASTION_COUNT}}'",
-                        "-var 'bootstrap={instance_type=\"${params.BOOTSTRAP_INSTANCE_TYPE}\",image_id=\"${params.BOOTSTRAP_IMAGE_ID}\",count=${params.BOOTSTRAP_COUNT}}'",
+                        "-var 'bastion={instance_type=\"${params.BASTION_INSTANCE_TYPE}\",image_id=\"${params.BASTION_IMAGE_ID}\",count=1}'",
+                        "-var 'bootstrap={instance_type=\"${params.BOOTSTRAP_INSTANCE_TYPE}\",image_id=\"${params.BOOTSTRAP_IMAGE_ID}\",count=1}'",
                         "-var 'master={instance_type=\"${params.MASTER_INSTANCE_TYPE}\",image_id=\"${params.MASTER_IMAGE_ID}\",count=${params.MASTER_COUNT}}'",
                         "-var 'worker={instance_type=\"${params.WORKER_INSTANCE_TYPE}\",image_id=\"${params.WORKER_IMAGE_ID}\",count=${params.WORKER_COUNT}}'"
                     ]
@@ -340,7 +320,7 @@ node('terraform') {
                         """
                     }
                 } // end withCredentials
-                } // end withEnv (PowerVC creds)
+                } // end withEnv
             }
         }
 
@@ -360,21 +340,18 @@ node('terraform') {
         // ── Terraform Apply ───────────────────────────────────────────────────
         stage('Terraform Apply') {
             dir('tf') {
-                // Provider credentials are needed even for plan-file applies
-                // (Terraform re-authenticates to build the provider client).
                 withEnv([
+                    "TF_VAR_auth_url=${params.POWERVC_AUTH_URL}",
                     "TF_VAR_user_name=${params.POWERVC_USERNAME}",
-                    "TF_VAR_password=${params.POWERVC_PASSWORD}"
+                    "TF_VAR_password=${params.POWERVC_PASSWORD}",
+                    "TF_VAR_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}"
                 ]) {
                 withCredentials([
-                    string(credentialsId: 'powervc-auth-url',    variable: 'TF_VAR_auth_url'),
                     string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name')
                 ]) {
                     withEnv(["TF_IN_AUTOMATION=true"]) {
                         sh """
                             echo "=== terraform apply ==="
-                            # All variable values were baked into the plan file.
-                            # No -var flags needed here.
                             terraform apply \\
                                 -no-color \\
                                 -input=false \\
@@ -383,7 +360,7 @@ node('terraform') {
                         """
                     }
                 } // end withCredentials
-                } // end withEnv (PowerVC creds)
+                } // end withEnv
             }
         }
 

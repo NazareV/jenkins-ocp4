@@ -62,14 +62,8 @@ credentials:
       - credentials:
 
           # ── PowerVC API ────────────────────────────────────────────────────
-          # user_name + password are now supplied by each user as job parameters.
-          # Only the shared env-level secrets remain here.
-          - string:
-              scope: GLOBAL
-              id: "powervc-auth-url"
-              secret: "${POWERVC_AUTH_URL}"
-              description: "PowerVC auth endpoint → TF_VAR_auth_url"
-
+          # auth_url, user_name, password, and availability_zone are now supplied
+          # by each user as job parameters. Only domain_name remains here.
           - string:
               scope: GLOBAL
               id: "powervc-domain-name"
