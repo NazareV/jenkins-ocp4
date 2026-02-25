@@ -246,6 +246,15 @@ node('terraform') {
             // providers in /opt/terraform-providers/.
             sh 'rm -f .terraform.lock.hcl && mkdir -p data'
         }
+
+        // Copy SSH keys to workspace with read permissions.
+        // The :ro mount from the host may not be readable by the jenkins uid;
+        // a local copy with chmod 400 guarantees access during the build.
+        sh """
+            cp "\$HOME/.ssh/id_rsa"     ssh_id_rsa
+            cp "\$HOME/.ssh/id_rsa.pub" ssh_id_rsa.pub
+            chmod 400 ssh_id_rsa
+        """
     }
 
     // ── Per-cluster lock ───────────────────────────────────────────────────────
@@ -256,6 +265,30 @@ node('terraform') {
             dir('tf') {
                 writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET
                 writeFile file: 'base-vars.tfvars',     text: params.BASE_VARS_CONTENT
+                // Node-sizing vars written as a tfvars file so Terraform uses its
+                // full HCL parser — avoids type-coercion issues with -var flags.
+                writeFile file: 'node-vars.tfvars', text: """\
+                    bastion = {
+                      instance_type = "${params.BASTION_INSTANCE_TYPE}"
+                      image_id      = "${params.BASTION_IMAGE_ID}"
+                      count         = 1
+                    }
+                    bootstrap = {
+                      instance_type = "${params.BOOTSTRAP_INSTANCE_TYPE}"
+                      image_id      = "${params.BOOTSTRAP_IMAGE_ID}"
+                      count         = 1
+                    }
+                    master = {
+                      instance_type = "${params.MASTER_INSTANCE_TYPE}"
+                      image_id      = "${params.MASTER_IMAGE_ID}"
+                      count         = ${params.MASTER_COUNT}
+                    }
+                    worker = {
+                      instance_type = "${params.WORKER_INSTANCE_TYPE}"
+                      image_id      = "${params.WORKER_IMAGE_ID}"
+                      count         = ${params.WORKER_COUNT}
+                    }
+                    """.stripIndent()
                 withCredentials([
                     file(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG')
                 ]) {
@@ -298,8 +331,8 @@ node('terraform') {
                         "-var 'tenant_name=${params.TENANT_NAME}'",
                         "-var 'cluster_id=${params.CLUSTER_ID}'",
                         "-var 'cluster_id_prefix=${params.CLUSTER_ID_PREFIX}'",
-                        "-var \"public_key_file=\${HOME}/.ssh/id_rsa.pub\"",
-                        "-var \"private_key_file=\${HOME}/.ssh/id_rsa\""
+                        "-var 'public_key_file=${env.WORKSPACE}/ssh_id_rsa.pub'",
+                        "-var 'private_key_file=${env.WORKSPACE}/ssh_id_rsa'"
                     ]
                     if (params.CLUSTER_DOMAIN?.trim()) {
                         clusterVars << "-var 'cluster_domain=${params.CLUSTER_DOMAIN}'"
@@ -310,13 +343,8 @@ node('terraform') {
                             "-var 'rhel_subscription_password=${params.RHEL_SUB_PASS}'"
                         ]
                     }
-                    // bastion and bootstrap counts are always 1
-                    clusterVars += [
-                        "-var 'bastion={instance_type=\"${params.BASTION_INSTANCE_TYPE}\",image_id=\"${params.BASTION_IMAGE_ID}\",count=1}'",
-                        "-var 'bootstrap={instance_type=\"${params.BOOTSTRAP_INSTANCE_TYPE}\",image_id=\"${params.BOOTSTRAP_IMAGE_ID}\",count=1}'",
-                        "-var 'master={instance_type=\"${params.MASTER_INSTANCE_TYPE}\",image_id=\"${params.MASTER_IMAGE_ID}\",count=${params.MASTER_COUNT}}'",
-                        "-var 'worker={instance_type=\"${params.WORKER_INSTANCE_TYPE}\",image_id=\"${params.WORKER_IMAGE_ID}\",count=${params.WORKER_COUNT}}'"
-                    ]
+                    // Node sizing is in node-vars.tfvars (written in Init stage).
+                    // Using -var-file avoids Terraform type-coercion issues with -var.
 
                     withEnv(["TF_IN_AUTOMATION=true"]) {
                         sh """
@@ -325,6 +353,7 @@ node('terraform') {
                                 -no-color \\
                                 -input=false \\
                                 -var-file="base-vars.tfvars" \\
+                                -var-file="node-vars.tfvars" \\
                                 ${clusterVars.join(' \\\n                                ')} \\
                                 -out='${wsName}.tfplan'
                         """
@@ -385,6 +414,6 @@ node('terraform') {
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars || true"
+    sh "rm -f tf/'${wsName}.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
 
 } // end node

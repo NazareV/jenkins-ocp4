@@ -64,6 +64,13 @@ node('terraform') {
             // providers in /opt/terraform-providers/.
             sh 'rm -f .terraform.lock.hcl && mkdir -p data'
         }
+
+        // Copy SSH keys to workspace with read permissions.
+        sh """
+            cp "\$HOME/.ssh/id_rsa"     ssh_id_rsa
+            cp "\$HOME/.ssh/id_rsa.pub" ssh_id_rsa.pub
+            chmod 400 ssh_id_rsa
+        """
     }
 
     // ── Terraform Init ────────────────────────────────────────────────────────
@@ -158,8 +165,8 @@ node('terraform') {
                         "-var 'tenant_name=${params.TENANT_NAME}'",
                         "-var 'cluster_id=${params.CLUSTER_ID}'",
                         "-var 'cluster_id_prefix=${params.CLUSTER_ID_PREFIX}'",
-                        "-var \"public_key_file=\${HOME}/.ssh/id_rsa.pub\"",
-                        "-var \"private_key_file=\${HOME}/.ssh/id_rsa\""
+                        "-var 'public_key_file=${env.WORKSPACE}/ssh_id_rsa.pub'",
+                        "-var 'private_key_file=${env.WORKSPACE}/ssh_id_rsa'"
                     ]
                     if (params.CLUSTER_DOMAIN?.trim()) {
                         clusterVars << "-var 'cluster_domain=${params.CLUSTER_DOMAIN}'"
@@ -221,7 +228,7 @@ node('terraform') {
     } // end lock
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars || true"
+    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
     echo "Cluster '${wsName}' destroyed successfully."
 
 } // end node
