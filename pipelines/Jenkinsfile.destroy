@@ -141,18 +141,8 @@ node('terraform') {
         stage('Terraform Plan Destroy') {
             dir('tf') {
                 withCredentials([
-                    usernamePassword(
-                        credentialsId: 'powervc-credentials',
-                        usernameVariable: 'TF_VAR_user_name',
-                        passwordVariable: 'TF_VAR_password'
-                    ),
                     string(credentialsId: 'powervc-auth-url',    variable: 'TF_VAR_auth_url'),
                     string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
-                    usernamePassword(
-                        credentialsId: 'rhel-subscription',
-                        usernameVariable: 'RHEL_SUB_USER',
-                        passwordVariable: 'RHEL_SUB_PASS'
-                    ),
                     file(credentialsId: 'tf-base-vars', variable: 'TF_BASE_VARS_FILE')
                 ]) {
                     def clusterVars = [
@@ -165,14 +155,18 @@ node('terraform') {
                     if (params.CLUSTER_DOMAIN?.trim()) {
                         clusterVars << "-var 'cluster_domain=${params.CLUSTER_DOMAIN}'"
                     }
-                    if (env.RHEL_SUBSCRIPTION_ENABLED == 'true' && env.RHEL_SUB_USER?.trim()) {
+                    if (params.RHEL_SUBSCRIPTION_ENABLED && params.RHEL_SUB_USER?.trim()) {
                         clusterVars += [
-                            "-var \"rhel_subscription_username=\${RHEL_SUB_USER}\"",
-                            "-var \"rhel_subscription_password=\${RHEL_SUB_PASS}\""
+                            "-var \"rhel_subscription_username=${params.RHEL_SUB_USER}\"",
+                            "-var \"rhel_subscription_password=${params.RHEL_SUB_PASS}\""
                         ]
                     }
 
-                    withEnv(["TF_IN_AUTOMATION=true"]) {
+                    withEnv([
+                        "TF_VAR_user_name=${params.POWERVC_USERNAME}",
+                        "TF_VAR_password=${params.POWERVC_PASSWORD}",
+                        "TF_IN_AUTOMATION=true"
+                    ]) {
                         sh """
                             echo "=== terraform plan -destroy ==="
                             terraform plan \\
@@ -191,30 +185,15 @@ node('terraform') {
         // ── Terraform Destroy ─────────────────────────────────────────────────
         stage('Terraform Destroy') {
             dir('tf') {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'powervc-credentials',
-                        usernameVariable: 'TF_VAR_user_name',
-                        passwordVariable: 'TF_VAR_password'
-                    ),
-                    string(credentialsId: 'powervc-auth-url',    variable: 'TF_VAR_auth_url'),
-                    string(credentialsId: 'powervc-domain-name', variable: 'TF_VAR_domain_name'),
-                    usernamePassword(
-                        credentialsId: 'rhel-subscription',
-                        usernameVariable: 'RHEL_SUB_USER',
-                        passwordVariable: 'RHEL_SUB_PASS'
-                    )
-                ]) {
-                    withEnv(["TF_IN_AUTOMATION=true"]) {
-                        sh """
-                            echo "=== terraform apply (destroy plan) ==="
-                            terraform apply \\
-                                -no-color \\
-                                -input=false \\
-                                -auto-approve \\
-                                '${wsName}-destroy.tfplan'
-                        """
-                    }
+                withEnv(["TF_IN_AUTOMATION=true"]) {
+                    sh """
+                        echo "=== terraform apply (destroy plan) ==="
+                        terraform apply \\
+                            -no-color \\
+                            -input=false \\
+                            -auto-approve \\
+                            '${wsName}-destroy.tfplan'
+                    """
                 }
             }
         }

@@ -142,6 +142,28 @@ pipelineJob('cluster-destroy') {
             'DELETE_WORKSPACE', true,
             'Delete the Terraform workspace from the state directory after successful destroy.'
         )
+        // ── PowerVC credentials ──────────────────────────────────────────────
+        stringParam(
+            'POWERVC_USERNAME', '',
+            'PowerVC / OpenStack username.'
+        )
+        nonStoredPasswordParam(
+            'POWERVC_PASSWORD',
+            'PowerVC / OpenStack password.'
+        )
+        // ── RHEL subscription (optional) ─────────────────────────────────────
+        booleanParam(
+            'RHEL_SUBSCRIPTION_ENABLED', false,
+            'Attach RHEL subscription on provisioned nodes.'
+        )
+        stringParam(
+            'RHEL_SUB_USER', '',
+            'Red Hat subscription username (required when RHEL_SUBSCRIPTION_ENABLED).'
+        )
+        nonStoredPasswordParam(
+            'RHEL_SUB_PASS',
+            'Red Hat subscription password (required when RHEL_SUBSCRIPTION_ENABLED).'
+        )
     }
 
     definition {
