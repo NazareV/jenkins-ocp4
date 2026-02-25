@@ -213,8 +213,6 @@ node('terraform') {
     stage('Checkout') {
         checkout scm
 
-        sh 'mkdir -p "${TF_PLUGIN_CACHE_DIR}"'
-
         dir('tf') {
             checkout([
                 $class           : 'GitSCM',
@@ -230,7 +228,10 @@ node('terraform') {
                 }
                 '''.stripIndent()
 
-            sh 'mkdir -p data'
+            // Remove any committed lock file — it may have been generated for a
+            // different platform and would cause a hash mismatch with the ppc64le
+            // providers in /opt/terraform-providers/.
+            sh 'rm -f .terraform.lock.hcl && mkdir -p data'
         }
     }
 
@@ -253,6 +254,7 @@ node('terraform') {
                             -no-color \
                             -reconfigure \
                             -input=false \
+                            -plugin-dir /opt/terraform-providers/ \
                             -backend-config="${TF_BACKEND_CFG}"
                     '''
                 }
