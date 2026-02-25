@@ -182,12 +182,12 @@ node('terraform') {
         if (!params.POWERVC_AUTH_URL?.trim())             errors << '  • POWERVC_AUTH_URL is required'
         if (!params.OPENSTACK_AVAILABILITY_ZONE?.trim())  errors << '  • OPENSTACK_AVAILABILITY_ZONE is required'
         if (!params.POWERVC_USERNAME?.trim())             errors << '  • POWERVC_USERNAME is required'
-        if (!params.POWERVC_PASSWORD?.trim())             errors << '  • POWERVC_PASSWORD is required'
-        if (!params.OCP_PULL_SECRET?.trim())              errors << '  • OCP_PULL_SECRET is required'
-        if (!params.BASE_VARS_CONTENT?.trim())            errors << '  • BASE_VARS_CONTENT is required'
+        if (!params.POWERVC_PASSWORD?.toString()?.trim())  errors << '  • POWERVC_PASSWORD is required'
+        if (!params.OCP_PULL_SECRET?.toString()?.trim())   errors << '  • OCP_PULL_SECRET is required'
+        if (!params.BASE_VARS_CONTENT?.trim())             errors << '  • BASE_VARS_CONTENT is required'
         if (params.RHEL_SUBSCRIPTION_ENABLED) {
-            if (!params.RHEL_SUB_USER?.trim()) errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
-            if (!params.RHEL_SUB_PASS?.trim()) errors << '  • RHEL_SUB_PASS is required when RHEL_SUBSCRIPTION_ENABLED'
+            if (!params.RHEL_SUB_USER?.trim())              errors << '  • RHEL_SUB_USER is required when RHEL_SUBSCRIPTION_ENABLED'
+            if (!params.RHEL_SUB_PASS?.toString()?.trim()) errors << '  • RHEL_SUB_PASS is required when RHEL_SUBSCRIPTION_ENABLED'
         }
         // instance_type and image_id required for bastion, bootstrap, master
         [
