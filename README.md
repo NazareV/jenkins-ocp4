@@ -130,18 +130,23 @@ anything in this file — you may leave them out to keep the file clean:
 
 ### Step 4 — Encode credentials
 
-SSH keys must be base64-encoded so they can be injected as Jenkins file credentials.
-The Terraform backend config is **pre-encoded** in `.jenkins.env.local` for the default path
-(`/opt/terraform_states/terraform.tfstate`) — re-encode only if you use a different path.
+SSH keys must be base64-encoded so they can be injected as Jenkins credentials.
+The Terraform backend config is **pre-encoded** in `.jenkins.env.local` — re-encode only if
+you use different paths.
 
 ```bash
-# SSH keys (run on the CentOS host where the keys live)
+# SSH keys (run on the host where the keys live)
 export SSH_PRIVATE_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa)
 export SSH_PUBLIC_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa.pub)
 
-# Terraform backend config — only needed if you change the state path from the default:
-# printf 'path = "/your/custom/path/terraform.tfstate"\n' | base64
+# Terraform backend config — only needed if you change the default paths:
+export TF_BACKEND_CONFIG_B64=$(printf 'path = "/opt/terraform_states/terraform.tfstate"\nworkspace_dir = "/opt/terraform_states/terraform.tfstate.d"\n' | base64 -w0)
 ```
+
+> **Important:** `workspace_dir` must be set explicitly alongside `path`.
+> Terraform's local backend does **not** automatically derive the workspace directory from `path`
+> — without `workspace_dir`, named workspace state files are written to a path relative to the
+> current working directory (ephemeral Jenkins workspace) instead of the persistent state directory.
 
 ---
 
@@ -166,9 +171,9 @@ TF_REPO_BRANCH=main
 GIT_USERNAME=<your-git-username>
 GIT_TOKEN=<your-git-pat>
 
-TF_BACKEND_CONFIG_B64=<value from step 4>
-SSH_PRIVATE_KEY_B64=<value from step 4>
-SSH_PUBLIC_KEY_B64=<value from step 4>
+TF_BACKEND_CONFIG_B64=<TF_BACKEND_CONFIG_B64 from step 4>
+SSH_PRIVATE_KEY_B64=<SSH_PRIVATE_KEY_B64 from step 4>
+SSH_PUBLIC_KEY_B64=<SSH_PUBLIC_KEY_B64 from step 4>
 ```
 
 > `POWERVC_AUTH_URL`, `POWERVC_USERNAME`, `POWERVC_PASSWORD`, `OPENSTACK_AVAILABILITY_ZONE`,
