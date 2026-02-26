@@ -278,7 +278,10 @@ node('terraform') {
         }
     }
 
-    // ── Per-cluster lock ───────────────────────────────────────────────────────
+    // ── Per-cluster lock — Init / Workspace / Plan ────────────────────────────
+    // Released before the Approval gate so the lock is not held for up to 30 min
+    // while waiting for a human.  Apply re-acquires the lock and re-plans, so any
+    // cloud-state change during the wait is handled correctly.
     lock(resource: "tf-workspace-${wsName}", inversePrecedence: false) {
 
         // ── Terraform Init ────────────────────────────────────────────────────
@@ -318,9 +321,9 @@ node('terraform') {
 
                         echo "=== backend config ==="
                         cat "${TF_BACKEND_CFG}"
-                        if [ ! -s "${TF_BACKEND_CFG}" ]; then
-                            echo "ERROR: terraform-backend-config credential is empty."
-                            echo "  Set TF_BACKEND_CONFIG_B64 in your Jenkins env file."
+                        if ! grep -q 'path' "${TF_BACKEND_CFG}"; then
+                            echo "ERROR: terraform-backend-config credential is missing a 'path' entry."
+                            echo "  TF_BACKEND_CONFIG_B64 may be empty or contain only whitespace."
                             echo "  Example: printf 'path = \"/opt/terraform_states/terraform.tfstate\"\\n' | base64"
                             exit 1
                         fi
@@ -392,18 +395,25 @@ node('terraform') {
             }
         }
 
-        // ── Approval ──────────────────────────────────────────────────────────
-        if (!params.AUTO_APPROVE) {
-            stage('Approval') {
-                timeout(time: 30, unit: 'MINUTES') {
-                    input(
-                        message : "Apply cluster '${wsName}'? Review the plan above.",
-                        ok      : 'Approve and Apply',
-                        submitter: 'admin,ops-team'
-                    )
-                }
+    } // end lock (Init + Workspace + Plan)
+
+    // ── Approval ──────────────────────────────────────────────────────────────
+    // Lock is released here — Apply re-acquires it and re-plans, so the operator
+    // always approves what actually runs even if the wait lasts the full 30 min.
+    if (!params.AUTO_APPROVE) {
+        stage('Approval') {
+            timeout(time: 30, unit: 'MINUTES') {
+                input(
+                    message : "Apply cluster '${wsName}'? Review the plan above.",
+                    ok      : 'Approve and Apply',
+                    submitter: 'admin,ops-team'
+                )
             }
         }
+    }
+
+    // ── Per-cluster lock — Apply ───────────────────────────────────────────────
+    lock(resource: "tf-workspace-${wsName}", inversePrecedence: false) {
 
         // ── Terraform Apply ───────────────────────────────────────────────────
         // Plan and apply are combined inside retry() so each attempt generates
@@ -442,14 +452,22 @@ node('terraform') {
                                 stage('Cleanup on Failure') {
                                     echo "Apply failed after ${retryCnt} attempt(s) — destroying partially-created resources..."
                                     sh """
-                                        echo "=== terraform destroy (cleanup) ==="
-                                        terraform destroy \\
+                                        echo "=== terraform plan -destroy (cleanup) ==="
+                                        terraform plan \\
+                                            -no-color \\
+                                            -input=false \\
+                                            -destroy \\
+                                            -var-file="base-vars.tfvars" \\
+                                            -var-file="node-vars.tfvars" \\
+                                            ${clusterVars.join(' \\\n                                            ')} \\
+                                            -out='${wsName}-cleanup.tfplan'
+
+                                        echo "=== terraform apply (cleanup destroy) ==="
+                                        terraform apply \\
                                             -no-color \\
                                             -input=false \\
                                             -auto-approve \\
-                                            -var-file="base-vars.tfvars" \\
-                                            -var-file="node-vars.tfvars" \\
-                                            ${clusterVars.join(' \\\n                                            ')}
+                                            '${wsName}-cleanup.tfplan'
                                     """
                                 }
                             } catch (destroyErr) {
@@ -462,7 +480,7 @@ node('terraform') {
             }
         }
 
-    } // end lock
+    } // end lock (Apply)
 
     // ── Cluster Info ──────────────────────────────────────────────────────────
     stage('Cluster Info') {
@@ -484,6 +502,6 @@ node('terraform') {
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
+    sh "rm -f tf/'${wsName}.tfplan' tf/'${wsName}-cleanup.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
 
 } // end node

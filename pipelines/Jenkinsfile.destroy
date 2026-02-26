@@ -93,6 +93,31 @@ node('terraform') {
         dir('tf') {
             writeFile file: 'data/pull-secret.txt', text: params.OCP_PULL_SECRET.toString()
             writeFile file: 'base-vars.tfvars',     text: params.BASE_VARS_CONTENT
+            // Terraform requires all declared variables to be set even for destroy.
+            // Actual node sizing values are irrelevant — resources are identified from state.
+            // Placeholder values satisfy type requirements without user input on destroy.
+            writeFile file: 'node-vars.tfvars', text: '''\
+                bastion = {
+                  instance_type = "n/a"
+                  image_id      = "00000000-0000-0000-0000-000000000000"
+                  count         = 1
+                }
+                bootstrap = {
+                  instance_type = "n/a"
+                  image_id      = "00000000-0000-0000-0000-000000000000"
+                  count         = 1
+                }
+                master = {
+                  instance_type = "n/a"
+                  image_id      = "00000000-0000-0000-0000-000000000000"
+                  count         = 1
+                }
+                worker = {
+                  instance_type = "n/a"
+                  image_id      = "00000000-0000-0000-0000-000000000000"
+                  count         = 0
+                }
+                '''.stripIndent()
             withCredentials([
                 file(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG')
             ]) {
@@ -101,9 +126,9 @@ node('terraform') {
 
                     echo "=== backend config ==="
                     cat "${TF_BACKEND_CFG}"
-                    if [ ! -s "${TF_BACKEND_CFG}" ]; then
-                        echo "ERROR: terraform-backend-config credential is empty."
-                        echo "  Set TF_BACKEND_CONFIG_B64 in your Jenkins env file."
+                    if ! grep -q 'path' "${TF_BACKEND_CFG}"; then
+                        echo "ERROR: terraform-backend-config credential is missing a 'path' entry."
+                        echo "  TF_BACKEND_CONFIG_B64 may be empty or contain only whitespace."
                         echo "  Example: printf 'path = \"/opt/terraform_states/terraform.tfstate\"\\n' | base64"
                         exit 1
                     fi
@@ -212,6 +237,7 @@ node('terraform') {
                                 -input=false \\
                                 -destroy \\
                                 -var-file="base-vars.tfvars" \\
+                                -var-file="node-vars.tfvars" \\
                                 ${clusterVars.join(' \\\n                                ')} \\
                                 -out='${wsName}-destroy.tfplan'
                         """
@@ -236,6 +262,7 @@ node('terraform') {
                                     -input=false \\
                                     -destroy \\
                                     -var-file="base-vars.tfvars" \\
+                                    -var-file="node-vars.tfvars" \\
                                     ${clusterVars.join(' \\\n                                    ')} \\
                                     -out='${wsName}-destroy.tfplan'
 
@@ -270,7 +297,7 @@ node('terraform') {
     } // end lock
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
+    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
     echo "Cluster '${wsName}' destroyed successfully."
 
     } else {

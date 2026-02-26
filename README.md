@@ -130,18 +130,17 @@ anything in this file — you may leave them out to keep the file clean:
 
 ### Step 4 — Encode credentials
 
-The Terraform backend config and SSH keys are stored as Jenkins file credentials (base64-encoded).
-The pull secret and base vars are supplied directly as job parameters.
+SSH keys must be base64-encoded so they can be injected as Jenkins file credentials.
+The Terraform backend config is **pre-encoded** in `.jenkins.env.local` for the default path
+(`/opt/terraform_states/terraform.tfstate`) — re-encode only if you use a different path.
 
 ```bash
-# Terraform backend config
-cp backend/local-persistent.hcl.example backend.hcl
-export TF_BACKEND_CONFIG_B64=$(base64 -w0 backend.hcl)
-rm backend.hcl
-
 # SSH keys (run on the CentOS host where the keys live)
 export SSH_PRIVATE_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa)
 export SSH_PUBLIC_KEY_B64=$(base64 -w0 ~/.ssh/id_rsa.pub)
+
+# Terraform backend config — only needed if you change the state path from the default:
+# printf 'path = "/your/custom/path/terraform.tfstate"\n' | base64
 ```
 
 ---
@@ -197,7 +196,7 @@ docker run -d \
   --name jenkins-ocp4 \
   -p 8080:8080 \
   --env-file .jenkins.env \
-  -v jenkins_home:/var/jenkins_home \
+  -v jenkins_ocp4_home:/var/jenkins_home \
   -v $(pwd)/casc:/var/jenkins_home/casc:ro \
   -v /opt/terraform_states:/opt/terraform_states \
   jenkins-ocp4:local
@@ -205,6 +204,12 @@ docker run -d \
 
 > SSH keys are injected via `SSH_PRIVATE_KEY_B64` / `SSH_PUBLIC_KEY_B64` in `.jenkins.env` and stored
 > as Jenkins file credentials — no SSH volume mount needed.
+
+To restart an existing container (without recreating):
+
+```bash
+docker start jenkins-ocp4
+```
 
 ---
 
@@ -242,16 +247,6 @@ Jenkins is now fully operational. Trigger either job with parameters to provisio
 
 ---
 
-### Subsequent restarts
-
-No rebuild needed. The `jenkins_home` volume retains all configuration, credentials, and job history:
-
-```bash
-docker start jenkins-ocp4
-```
-
----
-
 ## Variable split
 
 | Source | Mechanism | Terraform variables |
@@ -259,7 +254,7 @@ docker start jenkins-ocp4
 | Job parameter `BASE_VARS_CONTENT` (multi-line text) | `-var-file` | `network_name`, `domain_name`, OCP tarball URLs, `cluster_domain` (default), `rhel_username`, features… |
 | Job parameters | `-var` flags | `auth_url`, `user_name`, `password`, `openstack_availability_zone`, `tenant_name`, `cluster_id`, `cluster_id_prefix`, `cluster_domain` (override), node sizing |
 | Job parameters | `-var` flags (optional) | `rhel_subscription_username`, `rhel_subscription_password` |
-| Host `~/.ssh/` | `-var` flags | `public_key_file`, `private_key_file` |
+| Jenkins file credential (`jenkins-ssh-private-key` / `jenkins-ssh-public-key`) | `-var` flags | `public_key_file`, `private_key_file` |
 
 **Terraform precedence (lowest → highest):** `TF_VAR_*` env vars → `-var-file` → `-var` flags.
 
@@ -352,9 +347,10 @@ No shared mutable state on disk between concurrent builds.
 | `MASTER_INSTANCE_TYPE` | — | PowerVC compute template for masters. Required. |
 | `MASTER_IMAGE_ID` | — | PowerVC image UUID for masters (RHCOS). Required. |
 | `MASTER_COUNT` | `3` | Number of master (control-plane) nodes. |
-| `WORKER_INSTANCE_TYPE` | — | PowerVC compute template for workers. Required. |
-| `WORKER_IMAGE_ID` | — | PowerVC image UUID for workers (RHCOS). Required. |
-| `WORKER_COUNT` | `2` | Number of worker (compute) nodes. |
+| `WORKER_INSTANCE_TYPE` | — | PowerVC compute template for workers. Required when `WORKER_COUNT > 0`. |
+| `WORKER_IMAGE_ID` | — | PowerVC image UUID for workers (RHCOS). Required when `WORKER_COUNT > 0`. |
+| `WORKER_COUNT` | `2` | Number of worker (compute) nodes. Set to `0` for SNO. |
+| `RETRY_COUNT` | `2` | Total apply attempts (1 = no retry). On final failure, a cleanup destroy runs automatically. |
 
 Workspace name: `<TENANT_NAME>-<CLUSTER_ID_PREFIX>-<CLUSTER_ID>`
 State file: `/opt/terraform_states/terraform.tfstate.d/<workspace>/terraform.tfstate`
@@ -363,10 +359,25 @@ State file: `/opt/terraform_states/terraform.tfstate.d/<workspace>/terraform.tfs
 
 ### cluster-destroy
 
-Same parameters as create (`BASE_VARS_CONTENT`, `OCP_PULL_SECRET`, identity, PowerVC connection, RHEL), plus:
-
 | Parameter | Default | Notes |
 |-----------|---------|-------|
+| `BASE_VARS_CONTENT` | — | Same content as used for create (required by Terraform variable validation). |
+| `OCP_PULL_SECRET` | — | OCP pull secret JSON (required). |
+| `TENANT_NAME` | — | OpenStack project name. Required. |
+| `CLUSTER_ID_PREFIX` | — | Your initials + cluster type (e.g. `vn-sno`). Required. |
+| `CLUSTER_ID` | — | Cluster identifier (e.g. `cluster01`). Required. |
+| `CLUSTER_DOMAIN` | — | OCP base domain override. Optional. |
+| `POWERVC_AUTH_URL` | — | Keystone auth URL. Required. |
+| `OPENSTACK_AVAILABILITY_ZONE` | — | Availability zone for all nodes. Required. |
+| `POWERVC_USERNAME` | — | OpenStack username. Required. |
+| `POWERVC_PASSWORD` | — | OpenStack password (masked). Required. |
+| `RHEL_SUBSCRIPTION_ENABLED` | `false` | Attach RHEL subscription on nodes. |
+| `RHEL_SUB_USER` | — | Red Hat subscription username (required when enabled). |
+| `RHEL_SUB_PASS` | — | Red Hat subscription password (required when enabled, masked). |
 | `DELETE_WORKSPACE` | `true` | Remove Terraform workspace from state dir after destroy. |
+| `RETRY_COUNT` | `2` | Total destroy attempts (1 = no retry). |
+
+> Node sizing parameters are **not** required for destroy — the pipeline writes placeholder values
+> that satisfy Terraform's type requirements. Resources are identified from state, not from vars.
 
 Operator must **type** the exact workspace name in the confirmation dialog to proceed.
