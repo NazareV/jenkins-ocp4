@@ -58,15 +58,16 @@ credentials:
       - credentials:
 
           # ── Terraform backend config ───────────────────────────────────────
-          # A .hcl file with the local backend path.
+          # Base64-encoded HCL with the local backend path.
           # See jenkins-ocp4/backend/local-persistent.hcl.example
-          # Encode: export TF_BACKEND_CONFIG_B64=$(base64 -w0 backend.hcl)
-          - file:
+          # Encode: printf 'path = "/opt/terraform_states/terraform.tfstate"\n' | base64
+          # Stored as a secret string (not file) — JCasC secretBytes/file handling
+          # has known issues with env-var interpolation; the pipeline decodes inline.
+          - string:
               scope: GLOBAL
               id: "terraform-backend-config"
-              fileName: "backend.hcl"
-              secretBytes: "${TF_BACKEND_CONFIG_B64}"
-              description: "Terraform backend config (.hcl) → passed to terraform init -backend-config"
+              secret: "${TF_BACKEND_CONFIG_B64}"
+              description: "Base64-encoded Terraform backend config (.hcl) — decoded by the pipeline before terraform init"
 
           # ── SSH keys for Terraform ─────────────────────────────────────────
           # Base64-encode on the CentOS host (Linux):

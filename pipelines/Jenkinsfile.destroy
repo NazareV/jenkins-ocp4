@@ -119,17 +119,19 @@ node('terraform') {
                 }
                 '''.stripIndent()
             withCredentials([
-                file(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG')
+                string(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG_B64')
             ]) {
                 sh '''
                     chmod 600 data/pull-secret.txt
 
+                    printf '%s' "${TF_BACKEND_CFG_B64}" | base64 -d > backend_cfg.hcl
                     echo "=== backend config ==="
-                    cat "${TF_BACKEND_CFG}"
-                    if ! grep -q 'path' "${TF_BACKEND_CFG}"; then
+                    cat backend_cfg.hcl
+                    if ! grep -q 'path' backend_cfg.hcl; then
                         echo "ERROR: terraform-backend-config credential is missing a 'path' entry."
                         echo "  TF_BACKEND_CONFIG_B64 may be empty or contain only whitespace."
                         echo "  Example: printf 'path = \"/opt/terraform_states/terraform.tfstate\"\\n' | base64"
+                        rm -f backend_cfg.hcl
                         exit 1
                     fi
 
@@ -139,7 +141,8 @@ node('terraform') {
                         -reconfigure \
                         -input=false \
                         -plugin-dir /opt/terraform-providers/ \
-                        -backend-config="${TF_BACKEND_CFG}"
+                        -backend-config=backend_cfg.hcl
+                    rm -f backend_cfg.hcl
                 '''
             }
         }
