@@ -154,19 +154,19 @@ node('terraform') {
     // finish with a warning rather than failing the build.
     stage('Verify Workspace Exists') {
         dir('tf') {
-            sh 'echo "=== terraform workspace list ===" && terraform workspace list -no-color'
-
+            // Use workspace select rather than workspace list — the local backend's
+            // list command has known issues with workspace_dir=null resolution in
+            // some Terraform builds. Select directly probes workspace existence.
             workspaceFound = sh(
-                script       : "terraform workspace list -no-color | grep -Eq '\\b${wsName}\\b'",
+                script       : "terraform workspace select -no-color '${wsName}'",
                 returnStatus : true
             ) == 0
 
             if (!workspaceFound) {
                 echo "WARNING: Workspace '${wsName}' not found in the state backend — nothing to destroy."
                 echo "  Check: TENANT_NAME='${params.TENANT_NAME}', CLUSTER_ID_PREFIX='${params.CLUSTER_ID_PREFIX}', CLUSTER_ID='${params.CLUSTER_ID}'"
-                echo "  Run 'terraform workspace list' on the agent to see all known workspaces."
             } else {
-                echo "Workspace '${wsName}' confirmed in backend."
+                echo "Workspace '${wsName}' confirmed and selected."
             }
         }
     }
