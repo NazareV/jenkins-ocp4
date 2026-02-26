@@ -241,6 +241,7 @@ node('terraform') {
                                 -no-color \\
                                 -input=false \\
                                 -destroy \\
+                                -refresh=false \\
                                 -var-file="base-vars.tfvars" \\
                                 -var-file="node-vars.tfvars" \\
                                 ${clusterVars.join(' \\\n                                ')} \\
@@ -266,6 +267,7 @@ node('terraform') {
                                     -no-color \\
                                     -input=false \\
                                     -destroy \\
+                                    -refresh=false \\
                                     -var-file="base-vars.tfvars" \\
                                     -var-file="node-vars.tfvars" \\
                                     ${clusterVars.join(' \\\n                                    ')} \\
