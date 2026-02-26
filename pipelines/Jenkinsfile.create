@@ -227,7 +227,7 @@ node('terraform') {
         if (errors) error("Parameter validation failed:\n${errors.join('\n')}")
 
         retryCnt = retryCntRaw.toInteger()
-        wsName = "${params.TENANT_NAME}-${params.CLUSTER_ID_PREFIX}-${params.CLUSTER_ID}"
+        wsName = "${params.TENANT_NAME.toString().trim()}-${params.CLUSTER_ID_PREFIX.toString().trim()}-${params.CLUSTER_ID.toString().trim()}"
         if (!(wsName ==~ /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,89}$/)) {
             error("Workspace name '${wsName}' is invalid (alphanumeric/dash/underscore, ≤90 chars, start alphanumeric).")
         }
