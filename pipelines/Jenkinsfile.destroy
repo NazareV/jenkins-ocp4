@@ -154,6 +154,8 @@ node('terraform') {
     // finish with a warning rather than failing the build.
     stage('Verify Workspace Exists') {
         dir('tf') {
+            sh 'echo "=== terraform workspace list ===" && terraform workspace list -no-color'
+
             workspaceFound = sh(
                 script       : "terraform workspace list -no-color | grep -Eq '\\b${wsName}\\b'",
                 returnStatus : true
