@@ -11,12 +11,14 @@
 //   3. Per-cluster Jenkins lock   — serialized with any concurrent create.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Escape a value for use in an HCL double-quoted string literal.
+def escHcl(v) { v.toString().replace('\\', '\\\\').replace('"', '\\"') }
+
 node('terraform') {
 
     def wsName          = ''
     def retryCnt        = 2
     def workspaceFound  = true   // set false when workspace doesn't exist → skip destroy
-    def clusterVars     = []     // populated in Plan Destroy, reused in Destroy retry
 
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
@@ -118,6 +120,29 @@ node('terraform') {
                   count         = 0
                 }
                 '''.stripIndent()
+            // Connection and identity vars: written as a tfvars file to avoid
+            // shell-quoting issues with -var flags (passwords with quotes, etc.).
+            // Loaded LAST so it overrides any duplicate keys in base-vars.tfvars.
+            def clusterVarsLines = [
+                "auth_url                    = \"${escHcl(params.POWERVC_AUTH_URL)}\"",
+                "user_name                   = \"${escHcl(params.POWERVC_USERNAME)}\"",
+                "password                    = \"${escHcl(params.POWERVC_PASSWORD)}\"",
+                "openstack_availability_zone = \"${escHcl(params.OPENSTACK_AVAILABILITY_ZONE)}\"",
+                "tenant_name                 = \"${escHcl(params.TENANT_NAME)}\"",
+                "cluster_id                  = \"${escHcl(params.CLUSTER_ID)}\"",
+                "cluster_id_prefix           = \"${escHcl(params.CLUSTER_ID_PREFIX)}\"",
+                "public_key_file             = \"${env.WORKSPACE}/ssh_id_rsa.pub\"",
+                "private_key_file            = \"${env.WORKSPACE}/ssh_id_rsa\""
+            ]
+            if (params.CLUSTER_DOMAIN?.trim()) {
+                clusterVarsLines << "cluster_domain              = \"${escHcl(params.CLUSTER_DOMAIN)}\""
+            }
+            if (params.RHEL_SUBSCRIPTION_ENABLED && params.RHEL_SUB_USER?.trim()) {
+                clusterVarsLines << "rhel_subscription_username  = \"${escHcl(params.RHEL_SUB_USER)}\""
+                clusterVarsLines << "rhel_subscription_password  = \"${escHcl(params.RHEL_SUB_PASS)}\""
+            }
+            writeFile file: 'cluster-vars.tfvars', text: clusterVarsLines.join('\n') + '\n'
+            sh 'chmod 600 cluster-vars.tfvars'
             withCredentials([
                 string(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG_B64')
             ]) {
@@ -213,27 +238,6 @@ node('terraform') {
         stage('Terraform Plan Destroy') {
             dir('tf') {
                 wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
-                    clusterVars = [
-                        "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
-                        "-var 'user_name=${params.POWERVC_USERNAME}'",
-                        "-var 'password=${params.POWERVC_PASSWORD}'",
-                        "-var 'openstack_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}'",
-                        "-var 'tenant_name=${params.TENANT_NAME}'",
-                        "-var 'cluster_id=${params.CLUSTER_ID}'",
-                        "-var 'cluster_id_prefix=${params.CLUSTER_ID_PREFIX}'",
-                        "-var 'public_key_file=${env.WORKSPACE}/ssh_id_rsa.pub'",
-                        "-var 'private_key_file=${env.WORKSPACE}/ssh_id_rsa'"
-                    ]
-                    if (params.CLUSTER_DOMAIN?.trim()) {
-                        clusterVars << "-var 'cluster_domain=${params.CLUSTER_DOMAIN}'"
-                    }
-                    if (params.RHEL_SUBSCRIPTION_ENABLED && params.RHEL_SUB_USER?.trim()) {
-                        clusterVars += [
-                            "-var \"rhel_subscription_username=${params.RHEL_SUB_USER}\"",
-                            "-var \"rhel_subscription_password=${params.RHEL_SUB_PASS}\""
-                        ]
-                    }
-
                     withEnv(["TF_IN_AUTOMATION=true"]) {
                         sh """
                             echo "=== terraform plan -destroy ==="
@@ -241,10 +245,9 @@ node('terraform') {
                                 -no-color \\
                                 -input=false \\
                                 -destroy \\
-                                -refresh=false \\
                                 -var-file="base-vars.tfvars" \\
                                 -var-file="node-vars.tfvars" \\
-                                ${clusterVars.join(' \\\n                                ')} \\
+                                -var-file="cluster-vars.tfvars" \\
                                 -out='${wsName}-destroy.tfplan'
                         """
                     }
@@ -267,10 +270,9 @@ node('terraform') {
                                     -no-color \\
                                     -input=false \\
                                     -destroy \\
-                                    -refresh=false \\
                                     -var-file="base-vars.tfvars" \\
                                     -var-file="node-vars.tfvars" \\
-                                    ${clusterVars.join(' \\\n                                    ')} \\
+                                    -var-file="cluster-vars.tfvars" \\
                                     -out='${wsName}-destroy.tfplan'
 
                                 echo "=== terraform apply (destroy, attempt) ==="
@@ -304,7 +306,7 @@ node('terraform') {
     } // end lock
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
+    sh "rm -f tf/'${wsName}-destroy.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars tf/cluster-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
     echo "Cluster '${wsName}' destroyed successfully."
 
     } else {

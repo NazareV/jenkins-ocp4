@@ -9,16 +9,15 @@
 // ── Variable split ─────────────────────────────────────────────────────────
 //   BASE_VARS_CONTENT param  → -var-file  → network, OCP tarball URLs, features…
 //                                           (written to base-vars.tfvars at runtime)
-//   Job parameters (user)    → -var flags  → auth_url, user_name, password,
-//                                           openstack_availability_zone
-//   Job parameters (user)    → -var flags  → rhel_subscription_* (optional,
-//                                           only injected when enabled)
-//   Job parameters           → -var flags  → tenant_name, cluster_id,
-//                                           cluster_id_prefix, cluster_domain,
-//                                           bastion{}, bootstrap{}, master{},
-//                                           worker{} (instance_type, image_id, count)
-//   Host SSH keys            → -var flags  → public_key_file, private_key_file
-//                                           ($HOME/.ssh/id_rsa[.pub])
+//   Job parameters (user)    → cluster-vars.tfvars → auth_url, user_name, password,
+//                                                    openstack_availability_zone,
+//                                                    tenant_name, cluster_id,
+//                                                    cluster_id_prefix, cluster_domain
+//   Job parameters (user)    → cluster-vars.tfvars → rhel_subscription_* (optional,
+//                                                    only injected when enabled)
+//   Job parameters           → node-vars.tfvars    → bastion{}, bootstrap{}, master{},
+//                                                    worker{} (instance_type, image_id, count)
+//   Host SSH keys            → cluster-vars.tfvars → public_key_file, private_key_file
 //
 // ── State files ────────────────────────────────────────────────────────────
 //   Backend : local, path set in terraform-backend-config credential
@@ -174,11 +173,13 @@ properties([
     ])
 ])
 
+// Escape a value for use in an HCL double-quoted string literal.
+def escHcl(v) { v.toString().replace('\\', '\\\\').replace('"', '\\"') }
+
 node('terraform') {
 
     def wsName      = ''
     def retryCnt    = 2
-    def clusterVars = []   // populated in Plan, reused in cleanup destroy
 
     // ── Validate ──────────────────────────────────────────────────────────────
     stage('Validate Parameters') {
@@ -313,6 +314,29 @@ node('terraform') {
                       count         = ${params.WORKER_COUNT}
                     }
                     """.stripIndent()
+                // Connection and identity vars: written as a tfvars file to avoid
+                // shell-quoting issues with -var flags (passwords with quotes, etc.).
+                // Loaded LAST so it overrides any duplicate keys in base-vars.tfvars.
+                def clusterVarsLines = [
+                    "auth_url                    = \"${escHcl(params.POWERVC_AUTH_URL)}\"",
+                    "user_name                   = \"${escHcl(params.POWERVC_USERNAME)}\"",
+                    "password                    = \"${escHcl(params.POWERVC_PASSWORD)}\"",
+                    "openstack_availability_zone = \"${escHcl(params.OPENSTACK_AVAILABILITY_ZONE)}\"",
+                    "tenant_name                 = \"${escHcl(params.TENANT_NAME)}\"",
+                    "cluster_id                  = \"${escHcl(params.CLUSTER_ID)}\"",
+                    "cluster_id_prefix           = \"${escHcl(params.CLUSTER_ID_PREFIX)}\"",
+                    "public_key_file             = \"${env.WORKSPACE}/ssh_id_rsa.pub\"",
+                    "private_key_file            = \"${env.WORKSPACE}/ssh_id_rsa\""
+                ]
+                if (params.CLUSTER_DOMAIN?.trim()) {
+                    clusterVarsLines << "cluster_domain              = \"${escHcl(params.CLUSTER_DOMAIN)}\""
+                }
+                if (params.RHEL_SUBSCRIPTION_ENABLED && params.RHEL_SUB_USER?.trim()) {
+                    clusterVarsLines << "rhel_subscription_username  = \"${escHcl(params.RHEL_SUB_USER)}\""
+                    clusterVarsLines << "rhel_subscription_password  = \"${escHcl(params.RHEL_SUB_PASS)}\""
+                }
+                writeFile file: 'cluster-vars.tfvars', text: clusterVarsLines.join('\n') + '\n'
+                sh 'chmod 600 cluster-vars.tfvars'
                 withCredentials([
                     string(credentialsId: 'terraform-backend-config', variable: 'TF_BACKEND_CFG_B64')
                 ]) {
@@ -359,29 +383,6 @@ node('terraform') {
         stage('Terraform Plan') {
             dir('tf') {
                 wrap([$class: 'MaskPasswordsBuildWrapper', varPasswordPairs: [[password: params.POWERVC_PASSWORD, var: 'POWERVC_PASSWORD']]]) {
-                    clusterVars = [
-                        "-var 'auth_url=${params.POWERVC_AUTH_URL}'",
-                        "-var 'user_name=${params.POWERVC_USERNAME}'",
-                        "-var 'password=${params.POWERVC_PASSWORD}'",
-                        "-var 'openstack_availability_zone=${params.OPENSTACK_AVAILABILITY_ZONE}'",
-                        "-var 'tenant_name=${params.TENANT_NAME}'",
-                        "-var 'cluster_id=${params.CLUSTER_ID}'",
-                        "-var 'cluster_id_prefix=${params.CLUSTER_ID_PREFIX}'",
-                        "-var 'public_key_file=${env.WORKSPACE}/ssh_id_rsa.pub'",
-                        "-var 'private_key_file=${env.WORKSPACE}/ssh_id_rsa'"
-                    ]
-                    if (params.CLUSTER_DOMAIN?.trim()) {
-                        clusterVars << "-var 'cluster_domain=${params.CLUSTER_DOMAIN}'"
-                    }
-                    if (params.RHEL_SUBSCRIPTION_ENABLED && params.RHEL_SUB_USER?.trim()) {
-                        clusterVars += [
-                            "-var 'rhel_subscription_username=${params.RHEL_SUB_USER}'",
-                            "-var 'rhel_subscription_password=${params.RHEL_SUB_PASS}'"
-                        ]
-                    }
-                    // Node sizing is in node-vars.tfvars (written in Init stage).
-                    // Using -var-file avoids Terraform type-coercion issues with -var.
-
                     withEnv(["TF_IN_AUTOMATION=true"]) {
                         sh """
                             echo "=== terraform plan ==="
@@ -390,7 +391,7 @@ node('terraform') {
                                 -input=false \\
                                 -var-file="base-vars.tfvars" \\
                                 -var-file="node-vars.tfvars" \\
-                                ${clusterVars.join(' \\\n                                ')} \\
+                                -var-file="cluster-vars.tfvars" \\
                                 -out='${wsName}.tfplan'
                         """
                     }
@@ -439,7 +440,7 @@ node('terraform') {
                                         -input=false \\
                                         -var-file="base-vars.tfvars" \\
                                         -var-file="node-vars.tfvars" \\
-                                        ${clusterVars.join(' \\\n                                        ')} \\
+                                        -var-file="cluster-vars.tfvars" \\
                                         -out='${wsName}.tfplan'
 
                                     echo "=== terraform apply (attempt) ==="
@@ -462,7 +463,7 @@ node('terraform') {
                                             -destroy \\
                                             -var-file="base-vars.tfvars" \\
                                             -var-file="node-vars.tfvars" \\
-                                            ${clusterVars.join(' \\\n                                            ')} \\
+                                            -var-file="cluster-vars.tfvars" \\
                                             -out='${wsName}-cleanup.tfplan'
 
                                         echo "=== terraform apply (cleanup destroy) ==="
@@ -505,6 +506,6 @@ node('terraform') {
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
-    sh "rm -f tf/'${wsName}.tfplan' tf/'${wsName}-cleanup.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
+    sh "rm -f tf/'${wsName}.tfplan' tf/'${wsName}-cleanup.tfplan' tf/data/pull-secret.txt tf/base-vars.tfvars tf/node-vars.tfvars tf/cluster-vars.tfvars ssh_id_rsa ssh_id_rsa.pub || true"
 
 } // end node

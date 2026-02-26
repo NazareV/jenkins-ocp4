@@ -22,4 +22,5 @@
 #        export TF_BACKEND_CONFIG_B64=$(base64 -w0 local-persistent.hcl)
 # ─────────────────────────────────────────────────────────────────────────────
 
-path = "/opt/terraform_states/terraform.tfstate"
+path          = "/opt/terraform_states/terraform.tfstate"
+workspace_dir = "/opt/terraform_states/terraform.tfstate.d"

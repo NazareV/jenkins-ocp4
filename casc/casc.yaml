@@ -105,11 +105,6 @@ unclassified:
   timestamper:
     allPipelines: true
 
-  lockableResourcesManager:
-    declaredResources:
-      - name: "tf-provider-init"
-        description: "Serializes first provider download when the plugin cache is cold."
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap: create the seed job
 # ─────────────────────────────────────────────────────────────────────────────
